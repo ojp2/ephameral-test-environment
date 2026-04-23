@@ -1,0 +1,116 @@
+{{- if .Values.wagerSvc.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wager-svc
+  labels:
+    app: wager-svc
+    test-case: {{ .Values.global.testCase }}
+spec:
+  replicas: {{ .Values.wagerSvc.replicaCount }}
+  selector:
+    matchLabels:
+      app: wager-svc
+  template:
+    metadata:
+      labels:
+        app: wager-svc
+        test-case: {{ .Values.global.testCase }}
+    spec:
+      serviceAccountName: wager-svc
+      initContainers:
+        # Wait for MySQL port AND for the schema-migrate Job to complete
+        - name: wait-for-mysql
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MySQL port..."
+              until nc -z mysql {{ .Values.mysql.port }}; do
+                sleep 3
+              done
+              echo "MySQL port open."
+        - name: wait-for-schema
+          image: mysql:8.0
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for schema-migrate to complete..."
+              until mysql -h mysql -u root -p"${MYSQL_ROOT_PASSWORD}" wagerdb \
+                -e "SELECT 1 FROM wager_transactions LIMIT 1;" > /dev/null 2>&1; do
+                echo "Table not ready yet, retrying in 5s..."
+                sleep 5
+              done
+              echo "Schema ready — wager_transactions table exists."
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mysql.rootPasswordSecret }}
+                  key: {{ .Values.mysql.rootPasswordKey }}
+      containers:
+        - name: wager-svc
+          image: "{{ .Values.wagerSvc.image.repository }}:{{ .Values.wagerSvc.image.tag }}"
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.wagerSvc.port }}
+          env:
+            - name: PORT
+              value: "{{ .Values.wagerSvc.port }}"
+            - name: GDS_URL
+              value: {{ .Values.wagerSvc.env.GDS_URL | quote }}
+            - name: ESB_URL
+              value: {{ .Values.wagerSvc.env.ESB_URL | quote }}
+            - name: GAME_CODE
+              value: {{ .Values.global.gameCode | quote }}
+            - name: DB_HOST
+              value: {{ .Values.wagerSvc.db.host | quote }}
+            - name: DB_PORT
+              value: "{{ .Values.wagerSvc.db.port }}"
+            - name: DB_NAME
+              value: {{ .Values.wagerSvc.db.name | quote }}
+            - name: DB_USER
+              value: {{ .Values.wagerSvc.db.user | quote }}
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.wagerSvc.db.passwordSecret }}
+                  key: {{ .Values.wagerSvc.db.passwordKey }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.wagerSvc.port }}
+            initialDelaySeconds: {{ .Values.wagerSvc.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.wagerSvc.readinessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.wagerSvc.readinessProbe.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.wagerSvc.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.wagerSvc.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wager-svc
+  labels:
+    app: wager-svc
+  annotations:
+    # Internal load balancer — accessible within VPC only, not exposed to internet
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+spec:
+  selector:
+    app: wager-svc
+  ports:
+    - name: http
+      port: {{ .Values.wagerSvc.port }}
+      targetPort: {{ .Values.wagerSvc.port }}
+  type: {{ .Values.wagerSvc.serviceType | default "LoadBalancer" }}
+{{- end }}

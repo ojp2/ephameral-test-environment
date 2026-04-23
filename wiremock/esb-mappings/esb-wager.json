@@ -1,0 +1,119 @@
+{
+  "mappings": [
+    {
+      "name": "ESB - Account balance for MM player (has funds)",
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/esb/account/balance",
+        "queryParameters": {
+          "gameCode": { "equalTo": "MM" }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "accountId": "ACC-TEST-MM-001",
+          "balance": 50.00,
+          "currency": "USD",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "name": "ESB - Account balance for PB player (no funds)",
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/esb/account/balance",
+        "queryParameters": {
+          "gameCode": { "equalTo": "PB" }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "accountId": "ACC-TEST-PB-001",
+          "balance": 0.00,
+          "currency": "USD",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "name": "ESB - Account balance for P5 (host no issue)",
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/esb/account/balance",
+        "queryParameters": {
+          "gameCode": { "equalTo": "P5" }
+        }
+      },
+      "response": {
+        "status": 503,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "error": "HOST_NO_ISSUE",
+          "message": "ESB host temporarily unavailable"
+        },
+        "fixedDelayMilliseconds": 1000
+      }
+    },
+    {
+      "name": "ESB - Submit purchase for MM (success)",
+      "request": {
+        "method": "POST",
+        "url": "/esb/purchase",
+        "bodyPatterns": [
+          { "matchesJsonPath": "$[?(@.gameCode == 'MM')]" }
+        ]
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "transactionId": "TXN-MM-{{randomValue type='UUID'}}",
+          "gameCode": "MM",
+          "status": "OK",
+          "message": "Purchase successful",
+          "wagerAmount": 2.00,
+          "drawDate": "2026-04-19",
+          "ticketNumbers": [7, 14, 23, 44, 61, 9]
+        },
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "name": "ESB - Submit purchase for PB (no funds)",
+      "request": {
+        "method": "POST",
+        "url": "/esb/purchase",
+        "bodyPatterns": [
+          { "matchesJsonPath": "$[?(@.gameCode == 'PB')]" }
+        ]
+      },
+      "response": {
+        "status": 402,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "transactionId": null,
+          "gameCode": "PB",
+          "status": "NO_FUNDS",
+          "message": "Insufficient funds",
+          "errorCode": "ESB-402"
+        }
+      }
+    },
+    {
+      "name": "ESB - Health",
+      "request": {
+        "method": "GET",
+        "url": "/esb/health"
+      },
+      "response": {
+        "status": 200,
+        "jsonBody": { "status": "UP", "service": "ESB Mock" }
+      }
+    }
+  ]
+}

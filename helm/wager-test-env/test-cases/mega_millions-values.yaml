@@ -1,0 +1,7 @@
+# Test case: mega_millions
+global:
+  testCase: mega_millions
+  gameCode: MM
+  expectedStatus: "200"
+  expectedResult: "OK"
+  wagerAmount: "2.00"

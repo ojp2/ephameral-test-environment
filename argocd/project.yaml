@@ -1,0 +1,52 @@
+# Apply once to the cluster: kubectl apply -f argocd/project.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: wager-tests
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Scoped project for ephemeral wager test environments
+
+  sourceRepos:
+    - https://github.com/YOUR_ORG/YOUR_REPO    # <-- replace
+    - https://charts.bitnami.com/bitnami
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: wager-test-*
+
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: batch
+      kind: Job
+    - group: ''
+      kind: Service
+    - group: ''
+      kind: ConfigMap
+    - group: ''
+      kind: ServiceAccount
+    - group: ''
+      kind: PersistentVolumeClaim
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    - group: ''
+      kind: ResourceQuota
+
+  roles:
+    - name: ci-deployer
+      description: GitHub Actions pipeline
+      policies:
+        - p, proj:wager-tests:ci-deployer, applications, *, wager-tests/*, allow

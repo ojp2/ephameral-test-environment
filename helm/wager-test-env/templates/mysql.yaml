@@ -1,0 +1,112 @@
+{{- if .Values.mysql.enabled }}
+---
+# Secret for MySQL credentials — generated fresh per namespace
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-secret
+  labels:
+    app: mysql
+type: Opaque
+stringData:
+  mysql-root-password: "rootpass-{{ randAlphaNum 8 }}"
+  mysql-password: "wagerpass-{{ randAlphaNum 8 }}"
+---
+# Init SQL as a ConfigMap mounted into MySQL
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init-sql
+  labels:
+    app: mysql
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS wager_transactions (
+        id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+        transaction_id VARCHAR(100) NOT NULL UNIQUE,
+        game_code      VARCHAR(10)  NOT NULL,
+        player_id      VARCHAR(100) NOT NULL,
+        wager_amount   DECIMAL(10,2) NOT NULL,
+        status         VARCHAR(50)  NOT NULL,
+        created_at     DATETIME     NOT NULL DEFAULT NOW(),
+        INDEX idx_game_code (game_code),
+        INDEX idx_player_id (player_id),
+        INDEX idx_status    (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+---
+# StatefulSet so MySQL gets a stable hostname
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  labels:
+    app: mysql
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: "{{ .Values.mysql.image.repository }}:{{ .Values.mysql.image.tag }}"
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.mysql.port }}
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mysql.rootPasswordSecret }}
+                  key: {{ .Values.mysql.rootPasswordKey }}
+            - name: MYSQL_DATABASE
+              value: {{ .Values.mysql.database | quote }}
+            - name: MYSQL_USER
+              value: {{ .Values.mysql.user | quote }}
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mysql.passwordSecret }}
+                  key: {{ .Values.mysql.passwordKey }}
+          volumeMounts:
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 12
+          resources:
+            {{- toYaml .Values.mysql.resources | nindent 12 }}
+      volumes:
+        - name: init-sql
+          configMap:
+            name: {{ .Values.mysql.initConfigMap }}
+  # No PVC — ephemeral, emptyDir storage is fine for tests
+  volumeClaimTemplates: []
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels:
+    app: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: {{ .Values.mysql.port }}
+      targetPort: {{ .Values.mysql.port }}
+  clusterIP: None   # Headless — StatefulSet DNS
+{{- end }}

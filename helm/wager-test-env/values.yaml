@@ -1,0 +1,107 @@
+# ── Global test case parameters ───────────────────────────────────────────────
+global:
+  testCase: mega_millions
+  gameCode: MM
+  expectedStatus: "200"
+  expectedResult: "OK"
+  wagerAmount: "2.00"
+  runId: "local"
+
+# ── MySQL ─────────────────────────────────────────────────────────────────────
+mysql:
+  enabled: true
+  image: mysql:8.0
+  rootPasswordSecret: mysql-secret
+  rootPasswordKey: mysql-root-password
+  passwordSecret: mysql-secret
+  passwordKey: mysql-password
+  database: wagerdb
+  username: wager
+  port: 3306
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── WireMock GDS (game data service mock) ─────────────────────────────────────
+wiremockGds:
+  enabled: true
+  image: wiremock/wiremock:3.3.1
+  port: 8081
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# ── WireMock ESB (account + purchase mock) ────────────────────────────────────
+wiremockEsb:
+  enabled: true
+  image: wiremock/wiremock:3.3.1
+  port: 8082
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# ── Wager App ─────────────────────────────────────────────────────────────────
+wagerSvc:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: YOUR_ECR_REGISTRY/wager-app   # overridden at deploy time
+    tag: latest                                # overridden at deploy time
+    pullPolicy: Always
+  port: 8080
+  serviceType: ClusterIP
+  env:
+    GDS_URL: "http://wiremock-gds:8081"
+    ESB_URL: "http://wiremock-esb:8082"
+  db:
+    host: mysql
+    port: 3306
+    name: wagerdb
+    user: wager
+    passwordSecret: mysql-secret
+    passwordKey: mysql-password
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 6
+
+# ── JMeter Job ────────────────────────────────────────────────────────────────
+jmeter:
+  enabled: true
+  image:
+    repository: YOUR_ECR_REGISTRY/wager-jmeter  # overridden at deploy time
+    tag: latest                                  # overridden at deploy time
+    pullPolicy: Always
+  # S3 bucket in tools account — JMeter writes results here
+  # Node role in app account must have cross-account write via bucket policy
+  s3Bucket: YOUR_S3_BUCKET                       # <-- replace
+  s3Prefix: wager-test-results
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi

@@ -1,0 +1,7 @@
+# Test case: powerball
+global:
+  testCase: powerball
+  gameCode: PB
+  expectedStatus: "402"
+  expectedResult: "NO_FUNDS"
+  wagerAmount: "2.00"

@@ -1,0 +1,119 @@
+{{- if .Values.wiremockGds.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wiremock-gds
+  labels:
+    app: wiremock-gds
+    test-case: {{ .Values.global.testCase }}
+spec:
+  replicas: {{ .Values.wiremockGds.replicaCount }}
+  selector:
+    matchLabels:
+      app: wiremock-gds
+  template:
+    metadata:
+      labels:
+        app: wiremock-gds
+    spec:
+      containers:
+        - name: wiremock-gds
+          image: "{{ .Values.wiremockGds.image.repository }}:{{ .Values.wiremockGds.image.tag }}"
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          args: {{ toJson .Values.wiremockGds.args }}
+          ports:
+            - containerPort: {{ .Values.wiremockGds.port }}
+          volumeMounts:
+            - name: mappings
+              mountPath: /home/wiremock/mappings
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /__admin/health
+              port: {{ .Values.wiremockGds.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          resources:
+            {{- toYaml .Values.wiremockGds.resources | nindent 12 }}
+      volumes:
+        - name: mappings
+          configMap:
+            name: {{ .Values.wiremockGds.mappingsConfigMap }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wiremock-gds
+  labels:
+    app: wiremock-gds
+spec:
+  selector:
+    app: wiremock-gds
+  ports:
+    - name: http
+      port: {{ .Values.wiremockGds.port }}
+      targetPort: {{ .Values.wiremockGds.port }}
+  type: ClusterIP
+{{- end }}
+
+{{- if .Values.wiremockEsb.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wiremock-esb
+  labels:
+    app: wiremock-esb
+    test-case: {{ .Values.global.testCase }}
+spec:
+  replicas: {{ .Values.wiremockEsb.replicaCount }}
+  selector:
+    matchLabels:
+      app: wiremock-esb
+  template:
+    metadata:
+      labels:
+        app: wiremock-esb
+    spec:
+      containers:
+        - name: wiremock-esb
+          image: "{{ .Values.wiremockEsb.image.repository }}:{{ .Values.wiremockEsb.image.tag }}"
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          args: {{ toJson .Values.wiremockEsb.args }}
+          ports:
+            - containerPort: {{ .Values.wiremockEsb.port }}
+          volumeMounts:
+            - name: mappings
+              mountPath: /home/wiremock/mappings
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /__admin/health
+              port: {{ .Values.wiremockEsb.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          resources:
+            {{- toYaml .Values.wiremockEsb.resources | nindent 12 }}
+      volumes:
+        - name: mappings
+          configMap:
+            name: {{ .Values.wiremockEsb.mappingsConfigMap }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wiremock-esb
+  labels:
+    app: wiremock-esb
+spec:
+  selector:
+    app: wiremock-esb
+  ports:
+    - name: http
+      port: {{ .Values.wiremockEsb.port }}
+      targetPort: {{ .Values.wiremockEsb.port }}
+  type: ClusterIP
+{{- end }}

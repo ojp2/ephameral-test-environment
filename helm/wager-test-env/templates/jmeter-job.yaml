@@ -1,0 +1,71 @@
+{{- if .Values.jmeter.enabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jmeter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: jmeter
+    app.kubernetes.io/part-of: wager-ephemeral
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jmeter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: jmeter
+    app.kubernetes.io/part-of: wager-ephemeral
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: jmeter
+        app.kubernetes.io/part-of: wager-ephemeral
+    spec:
+      serviceAccountName: jmeter
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-wager
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for wager-svc port..."
+              until nc -z wager-svc {{ .Values.wagerSvc.port }}; do
+                echo "  not ready, retrying in 3s..."
+                sleep 3
+              done
+              echo "wager-svc is reachable"
+      containers:
+        - name: jmeter
+          image: "{{ .Values.jmeter.image.repository }}:{{ .Values.jmeter.image.tag }}"
+          imagePullPolicy: {{ .Values.jmeter.image.pullPolicy | default "Always" }}
+          env:
+            - name: BASE_URL
+              value: "http://wager-svc:{{ .Values.wagerSvc.port }}"
+            - name: GAME_CODE
+              value: {{ .Values.global.gameCode | quote }}
+            - name: EXPECTED_STATUS
+              value: {{ .Values.global.expectedStatus | quote }}
+            - name: EXPECTED_RESULT
+              value: {{ .Values.global.expectedResult | quote }}
+            - name: WAGER_AMOUNT
+              value: {{ .Values.global.wagerAmount | quote }}
+            - name: TEST_CASE
+              value: {{ .Values.global.testCase | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.jmeter.s3Bucket | quote }}
+            - name: S3_PREFIX
+              value: "{{ .Values.jmeter.s3Prefix }}/{{ .Values.global.runId }}/{{ .Values.global.testCase }}"
+          resources:
+            {{- toYaml .Values.jmeter.resources | nindent 12 }}
+{{- end }}

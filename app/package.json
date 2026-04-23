@@ -1,0 +1,14 @@
+{
+  "name": "wager-app",
+  "version": "1.0.0",
+  "description": "Wager purchase service — ephemeral test env POC",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios":   "^1.6.0",
+    "express": "^4.18.0",
+    "mysql2":  "^3.6.0"
+  }
+}

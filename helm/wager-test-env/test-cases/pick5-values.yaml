@@ -1,0 +1,7 @@
+# Test case: pick5
+global:
+  testCase: pick5
+  gameCode: P5
+  expectedStatus: "503"
+  expectedResult: "HOST_NO_ISSUE"
+  wagerAmount: "1.00"

@@ -1,0 +1,97 @@
+version: '3.9'
+
+# ─── Local dev stack — mirrors the ephemeral K8s namespace exactly ────────────
+# Usage:
+#   docker compose up -d
+#   # Then run JMeter or curl manually — see README for examples
+#
+# Test case selection:
+#   TEST_CASE=powerball docker compose up -d   (re-creates wager-app with PB game code)
+#
+# Teardown:
+#   docker compose down -v
+
+x-wiremock-common: &wiremock-common
+  image: wiremock/wiremock:3.3.1
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://localhost:${PORT:-8081}/__admin/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+
+services:
+
+  # ── MySQL ────────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass-local
+      MYSQL_DATABASE: wagerdb
+      MYSQL_USER: wager
+      MYSQL_PASSWORD: wagerpass-local
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./app/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpass-local"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ── WireMock GDS (game data service) ────────────────────────────────────────
+  wiremock-gds:
+    <<: *wiremock-common
+    environment:
+      PORT: 8081
+    command: --port 8081 --verbose --global-response-templating
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./wiremock/gds-mappings:/home/wiremock/mappings:ro
+
+  # ── WireMock ESB (account + purchase) ───────────────────────────────────────
+  wiremock-esb:
+    <<: *wiremock-common
+    environment:
+      PORT: 8082
+    command: --port 8082 --verbose --global-response-templating
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./wiremock/esb-mappings:/home/wiremock/mappings:ro
+
+  # ── Wager App ────────────────────────────────────────────────────────────────
+  wager-app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    environment:
+      PORT: 8080
+      GDS_URL: http://wiremock-gds:8081
+      ESB_URL: http://wiremock-esb:8082
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: wagerdb
+      DB_USER: wager
+      DB_PASS: wagerpass-local
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      wiremock-gds:
+        condition: service_healthy
+      wiremock-esb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

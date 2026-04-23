@@ -1,0 +1,52 @@
+---
+# ServiceAccount used by the wager-svc initContainer to kubectl wait on the schema Job
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wager-svc
+  labels:
+    app.kubernetes.io/part-of: wager-ephemeral
+---
+# Role: allow wager-svc pod to read Jobs in its own namespace (needed for init wait)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: wager-svc-job-reader
+  labels:
+    app.kubernetes.io/part-of: wager-ephemeral
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: wager-svc-job-reader
+  labels:
+    app.kubernetes.io/part-of: wager-ephemeral
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: wager-svc-job-reader
+subjects:
+  - kind: ServiceAccount
+    name: wager-svc
+---
+# ClusterRole binding: allows ArgoCD application controller to manage resources
+# in the ephemeral namespace (created by the workflow before ArgoCD sync)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-manager-binding
+  labels:
+    app.kubernetes.io/part-of: wager-ephemeral
+    managed-by: github-actions
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - kind: ServiceAccount
+    name: argocd-application-controller
+    namespace: argocd

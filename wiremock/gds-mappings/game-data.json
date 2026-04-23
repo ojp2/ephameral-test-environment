@@ -1,0 +1,125 @@
+{
+  "mappings": [
+    {
+      "name": "GDS - Mega Millions game data",
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/gds/games/MM.*"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "gameCode": "MM",
+          "gameName": "Mega Millions",
+          "gameType": "LOTTERY",
+          "status": "ACTIVE",
+          "drawDate": "2026-04-19T21:00:00Z",
+          "jackpot": 350000000,
+          "ticketPrice": 2.00,
+          "maxDraws": 26,
+          "salesCutoff": "2026-04-19T20:45:00Z",
+          "numbers": {
+            "main": { "min": 1, "max": 70, "pick": 5 },
+            "mega": { "min": 1, "max": 25, "pick": 1 }
+          }
+        }
+      }
+    },
+    {
+      "name": "GDS - PowerBall game data",
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/gds/games/PB.*"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "gameCode": "PB",
+          "gameName": "PowerBall",
+          "gameType": "LOTTERY",
+          "status": "ACTIVE",
+          "drawDate": "2026-04-19T22:59:00Z",
+          "jackpot": 125000000,
+          "ticketPrice": 2.00,
+          "maxDraws": 26,
+          "salesCutoff": "2026-04-19T22:45:00Z",
+          "numbers": {
+            "main": { "min": 1, "max": 69, "pick": 5 },
+            "power": { "min": 1, "max": 26, "pick": 1 }
+          }
+        }
+      }
+    },
+    {
+      "name": "GDS - Pick 5 game data",
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/gds/games/P5.*"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "gameCode": "P5",
+          "gameName": "Pick 5",
+          "gameType": "NUMBERS",
+          "status": "ACTIVE",
+          "drawDate": "2026-04-16T14:00:00Z",
+          "jackpot": 100000,
+          "ticketPrice": 1.00,
+          "maxDraws": 7,
+          "numbers": {
+            "main": { "min": 0, "max": 9, "pick": 5 }
+          }
+        }
+      }
+    },
+    {
+      "name": "GDS - List all active games",
+      "request": {
+        "method": "GET",
+        "url": "/gds/games"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "games": [
+            { "gameCode": "MM",  "gameName": "Mega Millions", "status": "ACTIVE", "ticketPrice": 2.00 },
+            { "gameCode": "PB",  "gameName": "PowerBall",     "status": "ACTIVE", "ticketPrice": 2.00 },
+            { "gameCode": "P5",  "gameName": "Pick 5",        "status": "ACTIVE", "ticketPrice": 1.00 }
+          ]
+        }
+      }
+    },
+    {
+      "name": "GDS - Validate ticket numbers for MM",
+      "request": {
+        "method": "POST",
+        "url": "/gds/games/MM/validate"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "valid": true,
+          "gameCode": "MM",
+          "message": "Numbers are valid for this draw"
+        }
+      }
+    },
+    {
+      "name": "GDS - Health",
+      "request": {
+        "method": "GET",
+        "url": "/gds/health"
+      },
+      "response": {
+        "status": 200,
+        "jsonBody": { "status": "UP", "service": "GDS Mock" }
+      }
+    }
+  ]
+}
