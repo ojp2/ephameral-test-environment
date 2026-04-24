@@ -1,4 +1,4 @@
-# ── Global test case parameters ───────────────────────────────────────────────
+# ── Global ────────────────────────────────────────────────────────────────────
 global:
   testCase: mega_millions
   gameCode: MM
@@ -6,18 +6,24 @@ global:
   expectedResult: "OK"
   wagerAmount: "2.00"
   runId: "local"
+  image:
+    pullPolicy: IfNotPresent   # used by wiremock, mysql, wager-svc templates
 
 # ── MySQL ─────────────────────────────────────────────────────────────────────
 mysql:
   enabled: true
-  image: mysql:8.0
+  image:
+    repository: mysql
+    tag: "8.0"
   rootPasswordSecret: mysql-secret
   rootPasswordKey: mysql-root-password
   passwordSecret: mysql-secret
   passwordKey: mysql-password
   database: wagerdb
   username: wager
+  user: wager
   port: 3306
+  initConfigMap: mysql-init-sql
   resources:
     requests:
       cpu: 100m
@@ -29,8 +35,17 @@ mysql:
 # ── WireMock GDS (game data service mock) ─────────────────────────────────────
 wiremockGds:
   enabled: true
-  image: wiremock/wiremock:3.3.1
+  replicaCount: 1
+  image:
+    repository: wiremock/wiremock
+    tag: "3.3.1"
   port: 8081
+  args:
+    - "--port"
+    - "8081"
+    - "--verbose"
+    - "--global-response-templating"
+  mappingsConfigMap: wiremock-gds-mappings
   resources:
     requests:
       cpu: 50m
@@ -42,8 +57,17 @@ wiremockGds:
 # ── WireMock ESB (account + purchase mock) ────────────────────────────────────
 wiremockEsb:
   enabled: true
-  image: wiremock/wiremock:3.3.1
+  replicaCount: 1
+  image:
+    repository: wiremock/wiremock
+    tag: "3.3.1"
   port: 8082
+  args:
+    - "--port"
+    - "8082"
+    - "--verbose"
+    - "--global-response-templating"
+  mappingsConfigMap: wiremock-esb-mappings
   resources:
     requests:
       cpu: 50m
@@ -94,9 +118,7 @@ jmeter:
     repository: YOUR_ECR_REGISTRY/wager-jmeter  # overridden at deploy time
     tag: latest                                  # overridden at deploy time
     pullPolicy: Always
-  # S3 bucket in tools account — JMeter writes results here
-  # Node role in app account must have cross-account write via bucket policy
-  s3Bucket: YOUR_S3_BUCKET                       # <-- replace
+  # s3Bucket: YOUR_S3_BUCKET   # uncomment when S3 is configured
   s3Prefix: wager-test-results
   resources:
     requests:
