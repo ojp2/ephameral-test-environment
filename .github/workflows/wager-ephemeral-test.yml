@@ -113,6 +113,15 @@ jobs:
       TEST_CASE: ${{ needs.setup.outputs.test_case }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install ArgoCD CLI
+        run: |
+          mkdir -p $HOME/.local/bin
+          curl -sSL -o $HOME/.local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x $HOME/.local/bin/argocd
+          export PATH=$HOME/.local/bin:$PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          argocd version --client
 
       - name: Login to ArgoCD
         run: |
@@ -171,7 +180,15 @@ jobs:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ env.AWS_REGION }}
-
+      - name: Install ArgoCD CLI
+        run: |
+          mkdir -p $HOME/.local/bin
+          curl -sSL -o $HOME/.local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x $HOME/.local/bin/argocd
+          export PATH=$HOME/.local/bin:$PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          argocd version --client
       - name: Login to ArgoCD
         run: |
           argocd login ${{ env.ARGOCD_SERVER }} \
@@ -271,7 +288,15 @@ jobs:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ env.AWS_REGION }}
-
+      - name: Install ArgoCD CLI
+        run: |
+          mkdir -p $HOME/.local/bin
+          curl -sSL -o $HOME/.local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x $HOME/.local/bin/argocd
+          export PATH=$HOME/.local/bin:$PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          argocd version --client
       - name: Login to ArgoCD
         run: |
           argocd login ${{ env.ARGOCD_SERVER }} \
