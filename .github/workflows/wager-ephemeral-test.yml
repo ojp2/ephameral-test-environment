@@ -215,13 +215,13 @@ jobs:
           echo "Polling JMeter Job status via ArgoCD (max 10 mins)..."
           STATUS="unknown"
 
-          for i in $(seq 1 40); do
+          for i in $(seq 1 60); do
             STATUS=$(argocd app get ${{ env.NAMESPACE }} \
               ${{ env.ARGOCD_OPTS }} \
               --output json 2>/dev/null \
               | python3 scripts/get_job_status.py 2>/dev/null || echo "unknown")
 
-            echo "Attempt ${i}/40 — JMeter Job status: ${STATUS}"
+            echo "Attempt ${i}/60 — JMeter Job status: ${STATUS}"
 
             if [ "${STATUS}" = "Healthy" ] || [ "${STATUS}" = "Succeeded" ]; then
               echo "JMeter Job completed successfully"
@@ -234,36 +234,24 @@ jobs:
               exit 1
             fi
 
-            sleep 15
+            sleep 10
           done
 
-          if [[ "${STATUS}" != "Healthy" && "${STATUS}" != "Succeeded" ]]; then
-            echo "ERROR: JMeter Job timed out after 10 minutes"
+          if [ "${STATUS}" != "Succeeded" ]; then
+            echo "ERROR: JMeter Job timed out"
             argocd app get ${{ env.NAMESPACE }} ${{ env.ARGOCD_OPTS }}
             exit 1
           fi
 
-      # ── NEW: fetch Gist URL that JMeter pod uploaded results to ──────────────
-      - name: Get test results Gist URL
+      # ── Results uploaded from JMeter pod directly to GitHub Release ─────────
+      - name: Get test results Release URL
         if: always()
         run: |
-          echo "Fetching Gist URL from JMeter results ConfigMap..."
-
-          GIST_URL=$(argocd app get ${{ env.NAMESPACE }} \
-            ${{ env.ARGOCD_OPTS }} \
-            --output json 2>/dev/null \
-            | python3 scripts/get_gist_url.py 2>/dev/null || echo "not-found")
-
           echo "========================================"
           echo "  Test Run Summary"
           echo "  Test case : ${{ env.TEST_CASE }}"
           echo "  Run ID    : ${{ env.RUN_ID }}"
-          if [ "${GIST_URL}" != "not-found" ] && [ -n "${GIST_URL}" ]; then
-            echo "  Results   : ${GIST_URL}"
-          else
-            echo "  Results   : Check GitHub Gists for run-${{ env.RUN_ID }}"
-            echo "  Gist link : https://gist.github.com"
-          fi
+          echo "  Results   : https://github.com/${{ github.repository }}/releases/tag/test-results-${{ env.RUN_ID }}"
           echo "========================================"
 
       # ── S3 download commented out — uncomment when S3 is configured ──────────
@@ -278,29 +266,26 @@ jobs:
       #       "s3://${{ env.S3_BUCKET }}/${S3_PREFIX}/html-report/" \
       #       results/html-report/
 
-      - name: Validate results
-        run: |
-          TEST_CASE=${{ env.TEST_CASE }} \
-            bash scripts/validate-results.sh results/test-results.jtl
+      # Results live in JMeter pod (app cluster) not runner — commenting out
+      # - name: Validate results
+      #   run: |
+      #     TEST_CASE=${{ env.TEST_CASE }} \
+      #       bash scripts/validate-results.sh results/test-results.jtl
 
-      - name: Upload JMeter HTML report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: jmeter-report-${{ env.TEST_CASE }}-${{ env.RUN_ID }}
-          path: results/html-report/
+      # - name: Upload JMeter HTML report
+      #   if: always()
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: jmeter-report-${{ env.TEST_CASE }}-${{ env.RUN_ID }}
+      #     path: results/html-report/
 
-      - name: Upload JTL
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: jmeter-jtl-${{ env.TEST_CASE }}-${{ env.RUN_ID }}
-          path: results/test-results.jtl
+      # - name: Upload JTL
+      #   if: always()
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: jmeter-jtl-${{ env.TEST_CASE }}-${{ env.RUN_ID }}
+      #     path: results/test-results.jtl
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # 5. Teardown — always runs
-  # ─────────────────────────────────────────────────────────────────────────────
-  teardown:
     name: Teardown Ephemeral Env
     runs-on: arc-runners-sgisdevops
     needs: [setup, test]
@@ -337,28 +322,50 @@ jobs:
 
       - name: Delete all ephemeral ArgoCD apps
         run: |
-          delete_argocd_app() {
+          force_delete_app() {
             local APP="$1"
             echo "--- Deleting: $APP"
+
+            # Delete with cascade — removes all resources in namespace
             argocd app delete "$APP" \
               ${{ env.ARGOCD_OPTS }} \
+              --cascade \
               --yes 2>/dev/null || true
+
+            # Wait up to 60s for deletion
+            for i in $(seq 1 12); do
+              if ! argocd app get "$APP" \
+                ${{ env.ARGOCD_OPTS }} > /dev/null 2>&1; then
+                echo "--- $APP deleted"
+                return 0
+              fi
+              echo "  waiting for $APP to be deleted..."
+              sleep 5
+            done
+
+            # If still stuck — remove finalizer and force delete
+            echo "--- App stuck, removing finalizer: $APP"
+            argocd app delete "$APP" \
+              ${{ env.ARGOCD_OPTS }} \
+              --yes --force 2>/dev/null || true
           }
 
-          delete_argocd_app "${{ env.NAMESPACE }}"
+          echo "=== Deleting: ${{ env.NAMESPACE }} ==="
+          force_delete_app "${{ env.NAMESPACE }}"
 
+          echo "=== Cleaning up leftover wager-test-* apps ==="
           argocd app list \
             ${{ env.ARGOCD_OPTS }} \
             --output name 2>/dev/null \
             | grep "^wager-test-" \
             | while read APP; do
-                delete_argocd_app "$APP"
+                echo "Leftover: $APP"
+                force_delete_app "$APP"
               done
 
-          argocd app list \
-            ${{ env.ARGOCD_OPTS }} \
-            2>/dev/null \
-            | grep wager || echo "No wager apps remain"
+          echo "=== Final ArgoCD state ==="
+          argocd app list ${{ env.ARGOCD_OPTS }} 2>/dev/null \
+            | grep wager || echo "No wager apps remain — clean"
 
       # - name: Clean up S3 results
       #   run: |
