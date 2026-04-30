@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run-tests.sh
-# Runs JMeter test plan and uploads JTL results as a GitHub Release asset
+# Runs JMeter test plan, uploads JTL + HTML report zip to GitHub Release
 
 set -euo pipefail
 
@@ -11,10 +11,9 @@ set -euo pipefail
 : "${WAGER_AMOUNT:?WAGER_AMOUNT is required}"
 : "${TEST_CASE:?TEST_CASE is required}"
 : "${RUN_ID:?RUN_ID is required}"
-: "${GITHUB_REPO:?GITHUB_REPO is required}"  # e.g. sg-is-devops/helm
+: "${GITHUB_REPO:?GITHUB_REPO is required}"
 
 GITHUB_PAT="${GITHUB_PAT:-}"
-
 RESULTS_DIR=/jmeter/results
 mkdir -p "${RESULTS_DIR}/html-report"
 
@@ -56,6 +55,7 @@ jmeter -n \
   -JTEST_CASE="${TEST_CASE}"
 
 JMETER_EXIT=$?
+echo "JMeter exit code: ${JMETER_EXIT}"
 
 # ── Parse results ─────────────────────────────────────────────────────────────
 TOTAL=$(awk -F',' 'NR>1{c++} END{print c+0}' "${RESULTS_DIR}/test-results.jtl")
@@ -66,15 +66,18 @@ echo "========================================"
 echo "  Results: ${PASSED}/${TOTAL} passed | ${FAILED} failed"
 echo "========================================"
 
-# ── Upload results to GitHub Release ──────────────────────────────────────────
+# ── Upload to GitHub Release ──────────────────────────────────────────────────
 if [ -n "${GITHUB_PAT}" ]; then
-  echo "Uploading results to GitHub Release..."
+  echo "Creating GitHub Release..."
 
   RELEASE_TAG="test-results-${RUN_ID}"
   RELEASE_NAME="Test Results | ${TEST_CASE} | ${RUN_ID}"
-  RELEASE_BODY="Test Case: ${TEST_CASE}\nRun ID: ${RUN_ID}\nGame: ${GAME_CODE}\nExpected: HTTP ${EXPECTED_STATUS} / ${EXPECTED_RESULT}\nResults: ${PASSED}/${TOTAL} passed | ${FAILED} failed"
+  RELEASE_BODY="Test Case: ${TEST_CASE}
+Run ID: ${RUN_ID}
+Game: ${GAME_CODE}
+Expected: HTTP ${EXPECTED_STATUS} / ${EXPECTED_RESULT}
+Results: ${PASSED}/${TOTAL} passed | ${FAILED} failed"
 
-  # Create a release
   RELEASE_RESPONSE=$(curl -sf -X POST \
     -H "Authorization: token ${GITHUB_PAT}" \
     -H "Content-Type: application/json" \
@@ -91,9 +94,7 @@ if [ -n "${GITHUB_PAT}" ]; then
     UPLOAD_URL=$(echo "${RELEASE_RESPONSE}" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-# strip the {?name,label} suffix
-url = d.get('upload_url', '').split('{')[0]
-print(url)
+print(d.get('upload_url', '').split('{')[0])
 " 2>/dev/null || echo "")
 
     RELEASE_URL=$(echo "${RELEASE_RESPONSE}" | python3 -c "
@@ -103,20 +104,32 @@ print(d.get('html_url', 'unknown'))
 " 2>/dev/null || echo "unknown")
 
     if [ -n "${UPLOAD_URL}" ]; then
-      # Upload JTL file
+      # Upload JTL
       curl -sf -X POST \
         -H "Authorization: token ${GITHUB_PAT}" \
         -H "Content-Type: text/plain" \
         "${UPLOAD_URL}?name=test-results-${TEST_CASE}.jtl" \
         --data-binary @"${RESULTS_DIR}/test-results.jtl" > /dev/null
+      echo "JTL uploaded"
+
+      # Zip and upload HTML report
+      if [ -d "${RESULTS_DIR}/html-report" ]; then
+        cd "${RESULTS_DIR}"
+        zip -r html-report.zip html-report/ > /dev/null 2>&1
+        curl -sf -X POST \
+          -H "Authorization: token ${GITHUB_PAT}" \
+          -H "Content-Type: application/zip" \
+          "${UPLOAD_URL}?name=html-report-${TEST_CASE}.zip" \
+          --data-binary @html-report.zip > /dev/null
+        echo "HTML report zip uploaded"
+        cd - > /dev/null
+      fi
 
       echo "========================================"
       echo "  Results uploaded:"
       echo "  ${RELEASE_URL}"
+      echo "  Download html-report-${TEST_CASE}.zip and open index.html"
       echo "========================================"
-
-      # Save URL for pipeline to read
-      echo "${RELEASE_URL}" > "${RESULTS_DIR}/results-url.txt"
     fi
   else
     echo "WARNING: Failed to create GitHub Release"

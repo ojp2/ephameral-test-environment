@@ -1,17 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
   <hashTree>
-
-    <TestPlan guiclass="TestPlanGui" testclass="TestPlan"
-              testname="Wager Purchase — Ephemeral K8s Test" enabled="true">
-      <stringProp name="TestPlan.comments">
-        All parameters injected via -J flags from GitHub Actions:
-        BASE_URL, GAME_CODE, EXPECTED_STATUS, EXPECTED_RESULT, TEST_CASE, WAGER_AMOUNT
-      </stringProp>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Wager Purchase Test" enabled="true">
       <boolProp name="TestPlan.functional_mode">false</boolProp>
       <boolProp name="TestPlan.serialize_threadgroups">true</boolProp>
-      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments"
-                   guiclass="ArgumentsPanel" testclass="Arguments">
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments">
         <collectionProp name="Arguments.arguments">
           <elementProp name="BASE_URL" elementType="Argument">
             <stringProp name="Argument.name">BASE_URL</stringProp>
@@ -44,10 +37,8 @@
         </collectionProp>
       </elementProp>
     </TestPlan>
-
     <hashTree>
-      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup"
-                   testname="Wager Purchase Tests" enabled="true">
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Wager Purchase Tests" enabled="true">
         <stringProp name="ThreadGroup.on_sample_error">stoptest</stringProp>
         <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
           <boolProp name="LoopController.continue_forever">false</boolProp>
@@ -57,19 +48,7 @@
         <stringProp name="ThreadGroup.ramp_time">1</stringProp>
       </ThreadGroup>
       <hashTree>
-
-        <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement"
-                           testname="HTTP Defaults" enabled="true">
-          <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
-          <stringProp name="HTTPSampler.response_timeout">15000</stringProp>
-          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
-            <collectionProp name="Arguments.arguments"/>
-          </elementProp>
-        </ConfigTestElement>
-        <hashTree/>
-
-        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager"
-                       testname="Headers" enabled="true">
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="Headers" enabled="true">
           <collectionProp name="HeaderManager.headers">
             <elementProp name="" elementType="Header">
               <stringProp name="Header.name">Content-Type</stringProp>
@@ -87,212 +66,212 @@
         </HeaderManager>
         <hashTree/>
 
-        <!-- STEP 1 — Health check -->
-        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy"
-                          testname="01 Health check" enabled="true">
-          <stringProp name="HTTPSampler.domain">${__regexExtract(${BASE_URL},https?://([^:/]+),1,1,localhost)}</stringProp>
-          <stringProp name="HTTPSampler.port">${__regexExtract(${BASE_URL},:(\d+),1,1,8080)}</stringProp>
+        <!-- STEP 1: Health check -->
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="01 Health check" enabled="true">
+          <stringProp name="HTTPSampler.domain">${__regexFunction(${BASE_URL},(?:https?://)?([^:/]+)(?::\d+)?.*,$1$,1,)}</stringProp>
+          <stringProp name="HTTPSampler.port">${__regexFunction(${BASE_URL},(?:https?://)?[^:]+:(\d+).*,$1$,1,8080)}</stringProp>
           <stringProp name="HTTPSampler.protocol">http</stringProp>
           <stringProp name="HTTPSampler.method">GET</stringProp>
           <stringProp name="HTTPSampler.path">/health</stringProp>
+          <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">10000</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
         </HTTPSamplerProxy>
         <hashTree>
-          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion"
-                             testname="Assert 200" enabled="true">
-            <collectionProp name="Asserion.test_strings"><stringProp name="1">200</stringProp></collectionProp>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert 200" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="1">200</stringProp>
+            </collectionProp>
             <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
             <intProp name="Assertion.test_type">8</intProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
           </ResponseAssertion>
           <hashTree/>
-          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion"
-                             testname="Assert UP" enabled="true">
-            <collectionProp name="Asserion.test_strings"><stringProp name="1">UP</stringProp></collectionProp>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert UP in body" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="1">UP</stringProp>
+            </collectionProp>
             <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
             <intProp name="Assertion.test_type">2</intProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
           </ResponseAssertion>
           <hashTree/>
         </hashTree>
 
-        <!-- STEP 2 — Fetch game data via wager app -> GDS -->
-        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy"
-                          testname="02 Fetch game data [${GAME_CODE}]" enabled="true">
-          <stringProp name="HTTPSampler.domain">${__regexExtract(${BASE_URL},https?://([^:/]+),1,1,localhost)}</stringProp>
-          <stringProp name="HTTPSampler.port">${__regexExtract(${BASE_URL},:(\d+),1,1,8080)}</stringProp>
+        <!-- STEP 2: Fetch game data -->
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="02 Fetch game data" enabled="true">
+          <stringProp name="HTTPSampler.domain">${__regexFunction(${BASE_URL},(?:https?://)?([^:/]+)(?::\d+)?.*,$1$,1,)}</stringProp>
+          <stringProp name="HTTPSampler.port">${__regexFunction(${BASE_URL},(?:https?://)?[^:]+:(\d+).*,$1$,1,8080)}</stringProp>
           <stringProp name="HTTPSampler.protocol">http</stringProp>
           <stringProp name="HTTPSampler.method">GET</stringProp>
           <stringProp name="HTTPSampler.path">/api/games/${GAME_CODE}</stringProp>
+          <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">10000</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
         </HTTPSamplerProxy>
         <hashTree>
-          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion"
-                             testname="Assert 200 game data" enabled="true">
-            <collectionProp name="Asserion.test_strings"><stringProp name="1">200</stringProp></collectionProp>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert 200 game data" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="1">200</stringProp>
+            </collectionProp>
             <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
             <intProp name="Assertion.test_type">8</intProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
           </ResponseAssertion>
           <hashTree/>
-          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion"
-                             testname="Assert game ACTIVE" enabled="true">
-            <stringProp name="JSON_PATH">$.status</stringProp>
-            <stringProp name="EXPECTED_VALUE">ACTIVE</stringProp>
-            <boolProp name="JSONVALIDATION">true</boolProp>
-            <boolProp name="EXPECT_NULL">false</boolProp>
-            <boolProp name="INVERT">false</boolProp>
-            <boolProp name="ISREGEX">false</boolProp>
-          </JSONPathAssertion>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert game ACTIVE" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="1">ACTIVE</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+            <intProp name="Assertion.test_type">2</intProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+          </ResponseAssertion>
           <hashTree/>
-          <JSONPathExtractor guiclass="JSONPathExtractorGui" testclass="JSONPathExtractor"
-                             testname="Extract gameName">
-            <stringProp name="VAR">gameName</stringProp>
-            <stringProp name="JSONPATH">$.gameName</stringProp>
-            <stringProp name="DEFAULT">Unknown</stringProp>
-          </JSONPathExtractor>
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Extract gameName" enabled="true">
+            <stringProp name="RegexExtractor.useHeaders">false</stringProp>
+            <stringProp name="RegexExtractor.refname">gameName</stringProp>
+            <stringProp name="RegexExtractor.regex">"gameName"\s*:\s*"([^"]+)"</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default">Unknown</stringProp>
+            <stringProp name="RegexExtractor.match_no">1</stringProp>
+          </RegexExtractor>
           <hashTree/>
         </hashTree>
 
-        <!-- STEP 3 — Purchase wager -->
-        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy"
-                          testname="03 Purchase wager [${TEST_CASE}]" enabled="true">
-          <stringProp name="HTTPSampler.domain">${__regexExtract(${BASE_URL},https?://([^:/]+),1,1,localhost)}</stringProp>
-          <stringProp name="HTTPSampler.port">${__regexExtract(${BASE_URL},:(\d+),1,1,8080)}</stringProp>
+        <!-- STEP 3: Purchase wager -->
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="03 Purchase wager" enabled="true">
+          <stringProp name="HTTPSampler.domain">${__regexFunction(${BASE_URL},(?:https?://)?([^:/]+)(?::\d+)?.*,$1$,1,)}</stringProp>
+          <stringProp name="HTTPSampler.port">${__regexFunction(${BASE_URL},(?:https?://)?[^:]+:(\d+).*,$1$,1,8080)}</stringProp>
           <stringProp name="HTTPSampler.protocol">http</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <stringProp name="HTTPSampler.path">/api/wager/purchase</stringProp>
+          <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">15000</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
           <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
           <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
             <collectionProp name="Arguments.arguments">
               <elementProp name="" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">false</boolProp>
                 <stringProp name="Argument.value">{
-  "gameCode":    "${GAME_CODE}",
+  "gameCode": "${GAME_CODE}",
   "wagerAmount": ${WAGER_AMOUNT},
-  "playerId":    "${PLAYER_ID}",
-  "drawDate":    "2026-04-19",
-  "numbers":     [],
-  "testCase":    "${TEST_CASE}"
+  "playerId": "${PLAYER_ID}",
+  "drawDate": "2026-04-19",
+  "numbers": [],
+  "testCase": "${TEST_CASE}"
 }</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
               </elementProp>
             </collectionProp>
           </elementProp>
-          <stringProp name="HTTPSampler.method">POST</stringProp>
-          <stringProp name="HTTPSampler.path">/api/wager/purchase</stringProp>
         </HTTPSamplerProxy>
         <hashTree>
-
-          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion"
-                             testname="Assert HTTP ${EXPECTED_STATUS}" enabled="true">
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert HTTP status" enabled="true">
             <collectionProp name="Asserion.test_strings">
               <stringProp name="1">${EXPECTED_STATUS}</stringProp>
             </collectionProp>
             <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
             <intProp name="Assertion.test_type">8</intProp>
+            <boolProp name="Assertion.assume_success">true</boolProp>
           </ResponseAssertion>
           <hashTree/>
-
-          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion"
-                             testname="Assert body status = ${EXPECTED_RESULT}" enabled="true">
-            <stringProp name="JSON_PATH">$.status</stringProp>
-            <stringProp name="EXPECTED_VALUE">${EXPECTED_RESULT}</stringProp>
-            <boolProp name="JSONVALIDATION">true</boolProp>
-            <boolProp name="EXPECT_NULL">false</boolProp>
-            <boolProp name="INVERT">false</boolProp>
-            <boolProp name="ISREGEX">false</boolProp>
-          </JSONPathAssertion>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert body status" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="1">${EXPECTED_RESULT}</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+            <intProp name="Assertion.test_type">2</intProp>
+            <boolProp name="Assertion.assume_success">true</boolProp>
+          </ResponseAssertion>
           <hashTree/>
-
-          <JSONPathExtractor guiclass="JSONPathExtractorGui" testclass="JSONPathExtractor"
-                             testname="Extract transactionId">
-            <stringProp name="VAR">transactionId</stringProp>
-            <stringProp name="JSONPATH">$.transactionId</stringProp>
-            <stringProp name="DEFAULT">N/A</stringProp>
-          </JSONPathExtractor>
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Extract transactionId" enabled="true">
+            <stringProp name="RegexExtractor.useHeaders">false</stringProp>
+            <stringProp name="RegexExtractor.refname">transactionId</stringProp>
+            <stringProp name="RegexExtractor.regex">"transactionId"\s*:\s*"([^"]+)"</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default">N/A</stringProp>
+            <stringProp name="RegexExtractor.match_no">1</stringProp>
+          </RegexExtractor>
           <hashTree/>
-
-          <JSONPathExtractor guiclass="JSONPathExtractorGui" testclass="JSONPathExtractor"
-                             testname="Extract returned status">
-            <stringProp name="VAR">returnedStatus</stringProp>
-            <stringProp name="JSONPATH">$.status</stringProp>
-            <stringProp name="DEFAULT">UNKNOWN</stringProp>
-          </JSONPathExtractor>
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Extract returned status" enabled="true">
+            <stringProp name="RegexExtractor.useHeaders">false</stringProp>
+            <stringProp name="RegexExtractor.refname">returnedStatus</stringProp>
+            <stringProp name="RegexExtractor.regex">"status"\s*:\s*"([^"]+)"</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default">UNKNOWN</stringProp>
+            <stringProp name="RegexExtractor.match_no">1</stringProp>
+          </RegexExtractor>
           <hashTree/>
-
-          <JSR223Assertion guiclass="TestBeanGUI" testclass="JSR223Assertion"
-                           testname="Log result" enabled="true">
+          <JSR223Assertion guiclass="TestBeanGUI" testclass="JSR223Assertion" testname="Log result" enabled="true">
             <stringProp name="scriptLanguage">groovy</stringProp>
             <stringProp name="script">
-def matched = vars.get("returnedStatus") == vars.get("EXPECTED_RESULT") ? "PASS" : "FAIL"
-log.info("─── TEST RESULT | case=" + vars.get("TEST_CASE")
-  + " | game=" + vars.get("gameName")
-  + " | txn="  + vars.get("transactionId")
-  + " | status=" + vars.get("returnedStatus")
-  + " | expected=" + vars.get("EXPECTED_RESULT")
-  + " | " + matched + " ───")
+def testCase = vars.get("TEST_CASE")
+def txnId = vars.get("transactionId")
+def status = vars.get("returnedStatus")
+def expected = vars.get("EXPECTED_RESULT")
+def matched = (status == expected) ? "PASS" : "FAIL"
+log.info("TEST RESULT | case=" + testCase + " | game=" + vars.get("gameName") + " | txn=" + txnId + " | status=" + status + " | expected=" + expected + " | " + matched)
             </stringProp>
           </JSR223Assertion>
           <hashTree/>
-
         </hashTree>
 
-        <!-- STEP 4 — Verify persisted transaction (MM success only) -->
-        <IfController guiclass="IfControllerPanel" testclass="IfController"
-                      testname="Only if success (MM)" enabled="true">
+        <!-- STEP 4: Verify transaction (MM only) -->
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="Only if success" enabled="true">
           <stringProp name="IfController.condition">"${EXPECTED_RESULT}".equals("OK") &amp;&amp; !"${transactionId}".equals("N/A")</stringProp>
           <boolProp name="IfController.evaluateAll">false</boolProp>
           <boolProp name="IfController.useExpression">true</boolProp>
         </IfController>
         <hashTree>
-          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy"
-                            testname="04 Verify transaction [${transactionId}]" enabled="true">
-            <stringProp name="HTTPSampler.domain">${__regexExtract(${BASE_URL},https?://([^:/]+),1,1,localhost)}</stringProp>
-            <stringProp name="HTTPSampler.port">${__regexExtract(${BASE_URL},:(\d+),1,1,8080)}</stringProp>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="04 Verify transaction" enabled="true">
+            <stringProp name="HTTPSampler.domain">${__regexFunction(${BASE_URL},(?:https?://)?([^:/]+)(?::\d+)?.*,$1$,1,)}</stringProp>
+            <stringProp name="HTTPSampler.port">${__regexFunction(${BASE_URL},(?:https?://)?[^:]+:(\d+).*,$1$,1,8080)}</stringProp>
             <stringProp name="HTTPSampler.protocol">http</stringProp>
             <stringProp name="HTTPSampler.method">GET</stringProp>
             <stringProp name="HTTPSampler.path">/api/wager/transaction/${transactionId}</stringProp>
+            <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+            <stringProp name="HTTPSampler.response_timeout">10000</stringProp>
+            <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+            <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+              <collectionProp name="Arguments.arguments"/>
+            </elementProp>
           </HTTPSamplerProxy>
           <hashTree>
-            <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion"
-                               testname="Assert transaction 200" enabled="true">
-              <collectionProp name="Asserion.test_strings"><stringProp name="1">200</stringProp></collectionProp>
+            <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert transaction 200" enabled="true">
+              <collectionProp name="Asserion.test_strings">
+                <stringProp name="1">200</stringProp>
+              </collectionProp>
               <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
               <intProp name="Assertion.test_type">8</intProp>
+              <boolProp name="Assertion.assume_success">false</boolProp>
             </ResponseAssertion>
             <hashTree/>
-            <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion"
-                               testname="Assert persisted status = OK" enabled="true">
-              <stringProp name="JSON_PATH">$.status</stringProp>
-              <stringProp name="EXPECTED_VALUE">OK</stringProp>
-              <boolProp name="JSONVALIDATION">true</boolProp>
-              <boolProp name="EXPECT_NULL">false</boolProp>
-              <boolProp name="INVERT">false</boolProp>
-              <boolProp name="ISREGEX">false</boolProp>
-            </JSONPathAssertion>
+            <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert persisted OK" enabled="true">
+              <collectionProp name="Asserion.test_strings">
+                <stringProp name="1">OK</stringProp>
+              </collectionProp>
+              <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+              <intProp name="Assertion.test_type">2</intProp>
+              <boolProp name="Assertion.assume_success">false</boolProp>
+            </ResponseAssertion>
             <hashTree/>
           </hashTree>
         </hashTree>
-
-        <!-- Disabled listener — report built by jmeter -e flag -->
-        <ResultCollector guiclass="ViewResultsFullVisualizer" testclass="ResultCollector"
-                         testname="Results Tree (disabled in CI)" enabled="false">
-          <boolProp name="ResultCollector.error_logging">false</boolProp>
-          <objProp>
-            <n>saveConfig</n>
-            <value class="SampleSaveConfiguration">
-              <time>true</time><latency>true</latency><timestamp>true</timestamp>
-              <success>true</success><label>true</label><code>true</code>
-              <message>true</message><threadName>true</threadName>
-              <dataType>true</dataType><encoding>false</encoding>
-              <assertions>true</assertions><subresults>true</subresults>
-              <responseData>false</responseData><samplerData>false</samplerData>
-              <xml>false</xml><fieldNames>true</fieldNames>
-              <responseHeaders>false</responseHeaders><requestHeaders>false</requestHeaders>
-              <responseDataOnError>true</responseDataOnError>
-              <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
-              <bytes>true</bytes><sentBytes>true</sentBytes><url>true</url>
-              <threadCounts>true</threadCounts><idleTime>true</idleTime>
-              <connectTime>true</connectTime>
-            </value>
-          </objProp>
-          <stringProp name="filename"></stringProp>
-        </ResultCollector>
-        <hashTree/>
 
       </hashTree>
     </hashTree>
