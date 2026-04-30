@@ -176,3 +176,9 @@ scripts/
 
 docker-compose.yml   Local dev without K8s
 ```
+curl -v -X POST \
+  -H "Authorization: token YOUR_PAT" \
+  -H "Content-Type: application/json" \
+  https://api.github.com/repos/sg-is-devops/helm/releases \
+  -d '{"tag_name":"test-tag","name":"test","body":"test","draft":false,"prerelease":true}' \
+  2>&1 | grep -E "HTTP|message|errors"
