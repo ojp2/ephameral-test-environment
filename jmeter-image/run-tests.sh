@@ -73,7 +73,9 @@ echo "========================================"
 if [ -n "${GITHUB_PAT}" ]; then
   echo "Creating GitHub Release..."
 
-  RELEASE_TAG="test-results-${RUN_ID}"
+  # Use timestamp to ensure unique tag every run
+  TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
+  RELEASE_TAG="test-results-${RUN_ID}-${TIMESTAMP}"
   RELEASE_NAME="Test Results | ${TEST_CASE} | ${RUN_ID}"
   RELEASE_BODY="Test Case: ${TEST_CASE}
 Run ID: ${RUN_ID}
@@ -117,15 +119,16 @@ print(d.get('html_url', 'unknown'))
 
       # Zip and upload HTML report
       if [ -d "${RESULTS_DIR}/html-report" ]; then
-        cd "${RESULTS_DIR}"
-        zip -r html-report.zip html-report/ > /dev/null 2>&1
-        curl -sf -X POST \
-          -H "Authorization: token ${GITHUB_PAT}" \
-          -H "Content-Type: application/zip" \
-          "${UPLOAD_URL}?name=html-report-${TEST_CASE}.zip" \
-          --data-binary @html-report.zip > /dev/null
-        echo "HTML report zip uploaded"
-        cd - > /dev/null
+        (
+          cd "${RESULTS_DIR}" && \
+          zip -r html-report.zip html-report/ > /dev/null 2>&1 && \
+          curl -sf -X POST \
+            -H "Authorization: token ${GITHUB_PAT}" \
+            -H "Content-Type: application/zip" \
+            "${UPLOAD_URL}?name=html-report-${TEST_CASE}.zip" \
+            --data-binary @html-report.zip > /dev/null && \
+          echo "HTML report zip uploaded"
+        ) || echo "WARNING: HTML report upload failed — continuing"
       fi
 
       echo "========================================"
