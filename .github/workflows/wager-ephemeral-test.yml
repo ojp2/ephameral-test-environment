@@ -29,7 +29,7 @@ concurrency:
 
 env:
   ARGOCD_SERVER: argocd-np-server.argocd.svc.cluster.local:80
-  ECR_REGISTRY:  
+  ECR_REGISTRY:  891376915593.dkr.ecr.us-east-1.amazonaws.com/upam/base-images/test-image
   AWS_REGION:    us-east-1
   #S3_BUCKET:    YOUR_S3_BUCKET
   IMAGE_TAG:     ${{ github.sha }}
@@ -142,7 +142,7 @@ jobs:
             --repo https://github.com/${{ github.repository }} \
             --revision ${{ github.sha }} \
             --path helm/wager-test-env \
-            --dest-server  \
+            --dest-server https://F007B6C7CA6712CD44A123FCAF6EDE38.gr7.us-east-1.eks.amazonaws.com \
             --dest-namespace ${{ env.NAMESPACE }} \
             --values values.yaml \
             --values test-cases/${VALUES_CASE}-values.yaml \
@@ -219,20 +219,7 @@ jobs:
             STATUS=$(argocd app get ${{ env.NAMESPACE }} \
               ${{ env.ARGOCD_OPTS }} \
               --output json 2>/dev/null \
-              | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    for r in d.get('status', {}).get('resources', []):
-        if r.get('name') == 'jmeter' and r.get('kind') == 'Job':
-            h = r.get('health', {}).get('status', '')
-            s = r.get('status', '')
-            print(h if h else s)
-            sys.exit(0)
-    print('unknown')
-except:
-    print('unknown')
-" 2>/dev/null || echo "unknown")
+              | python3 scripts/get_job_status.py 2>/dev/null || echo "unknown")
 
             echo "Attempt ${i}/40 — JMeter Job status: ${STATUS}"
 
@@ -265,18 +252,7 @@ except:
           GIST_URL=$(argocd app get ${{ env.NAMESPACE }} \
             ${{ env.ARGOCD_OPTS }} \
             --output json 2>/dev/null \
-            | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    for r in d.get('status', {}).get('resources', []):
-        if r.get('name') == 'jmeter-gist-url' and r.get('kind') == 'ConfigMap':
-            print(r.get('liveState', {}).get('data', {}).get('url', 'not-found'))
-            sys.exit(0)
-    print('not-found')
-except:
-    print('not-found')
-" 2>/dev/null || echo "not-found")
+            | python3 scripts/get_gist_url.py 2>/dev/null || echo "not-found")
 
           echo "========================================"
           echo "  Test Run Summary"
