@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # run-tests.sh
-# Runs JMeter test plan and uploads results to GitHub Gist using PAT from Vault secret
+# Runs JMeter test plan and uploads JTL results as a GitHub Release asset
 
 set -euo pipefail
 
-# ── Required env vars ─────────────────────────────────────────────────────────
 : "${BASE_URL:?BASE_URL is required}"
 : "${GAME_CODE:?GAME_CODE is required}"
 : "${EXPECTED_STATUS:?EXPECTED_STATUS is required}"
@@ -12,9 +11,8 @@ set -euo pipefail
 : "${WAGER_AMOUNT:?WAGER_AMOUNT is required}"
 : "${TEST_CASE:?TEST_CASE is required}"
 : "${RUN_ID:?RUN_ID is required}"
+: "${GITHUB_REPO:?GITHUB_REPO is required}"  # e.g. sg-is-devops/helm
 
-# GitHub PAT — injected from Vault secret mounted as env var
-# Secret key name from vault secret gh-devops-token
 GITHUB_PAT="${GITHUB_PAT:-}"
 
 RESULTS_DIR=/jmeter/results
@@ -28,7 +26,7 @@ echo "  Target URL  : ${BASE_URL}"
 echo "  Expected    : HTTP ${EXPECTED_STATUS} / ${EXPECTED_RESULT}"
 echo "========================================"
 
-# ── Wait for wager app to be healthy ──────────────────────────────────────────
+# ── Wait for wager app ────────────────────────────────────────────────────────
 echo "Waiting for wager app at ${BASE_URL}/health..."
 for i in $(seq 1 30); do
   if curl -sf "${BASE_URL}/health" > /dev/null 2>&1; then
@@ -40,7 +38,7 @@ for i in $(seq 1 30); do
 done
 
 curl -sf "${BASE_URL}/health" || {
-  echo "ERROR: Wager app not healthy after 150s"
+  echo "ERROR: Wager app not healthy"
   exit 1
 }
 
@@ -58,83 +56,76 @@ jmeter -n \
   -JTEST_CASE="${TEST_CASE}"
 
 JMETER_EXIT=$?
-echo "JMeter exit code: ${JMETER_EXIT}"
 
-# ── Validate results ──────────────────────────────────────────────────────────
-TOTAL=$(awk -F',' 'NR>1{count++} END{print count+0}' "${RESULTS_DIR}/test-results.jtl")
-FAILED=$(awk -F',' 'NR>1 && $8=="false"{count++} END{print count+0}' "${RESULTS_DIR}/test-results.jtl")
-PASSED=$(awk -F',' 'NR>1 && $8=="true"{count++} END{print count+0}' "${RESULTS_DIR}/test-results.jtl")
+# ── Parse results ─────────────────────────────────────────────────────────────
+TOTAL=$(awk -F',' 'NR>1{c++} END{print c+0}' "${RESULTS_DIR}/test-results.jtl")
+FAILED=$(awk -F',' 'NR>1 && $8=="false"{c++} END{print c+0}' "${RESULTS_DIR}/test-results.jtl")
+PASSED=$(awk -F',' 'NR>1 && $8=="true"{c++} END{print c+0}' "${RESULTS_DIR}/test-results.jtl")
 
 echo "========================================"
 echo "  Results: ${PASSED}/${TOTAL} passed | ${FAILED} failed"
-echo "  Test case: ${TEST_CASE}"
 echo "========================================"
 
-# ── Upload results to GitHub Gist ─────────────────────────────────────────────
+# ── Upload results to GitHub Release ──────────────────────────────────────────
 if [ -n "${GITHUB_PAT}" ]; then
-  echo "Uploading results to GitHub Gist..."
+  echo "Uploading results to GitHub Release..."
 
-  # Read JTL content — escape for JSON
-  JTL_CONTENT=$(cat "${RESULTS_DIR}/test-results.jtl" | python3 -c "
-import sys, json
-content = sys.stdin.read()
-print(json.dumps(content))
-")
+  RELEASE_TAG="test-results-${RUN_ID}"
+  RELEASE_NAME="Test Results | ${TEST_CASE} | ${RUN_ID}"
+  RELEASE_BODY="Test Case: ${TEST_CASE}\nRun ID: ${RUN_ID}\nGame: ${GAME_CODE}\nExpected: HTTP ${EXPECTED_STATUS} / ${EXPECTED_RESULT}\nResults: ${PASSED}/${TOTAL} passed | ${FAILED} failed"
 
-  # Build summary content
-  SUMMARY="Test Case: ${TEST_CASE}
-Run ID: ${RUN_ID}
-Game Code: ${GAME_CODE}
-Expected: HTTP ${EXPECTED_STATUS} / ${EXPECTED_RESULT}
-Results: ${PASSED}/${TOTAL} passed | ${FAILED} failed
-JMeter Exit Code: ${JMETER_EXIT}
-Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-  SUMMARY_JSON=$(echo "${SUMMARY}" | python3 -c "
-import sys, json
-content = sys.stdin.read()
-print(json.dumps(content))
-")
-
-  # Create GitHub Gist with both files
-  GIST_RESPONSE=$(curl -sf -X POST \
+  # Create a release
+  RELEASE_RESPONSE=$(curl -sf -X POST \
     -H "Authorization: token ${GITHUB_PAT}" \
     -H "Content-Type: application/json" \
-    https://api.github.com/gists \
+    "https://api.github.com/repos/${GITHUB_REPO}/releases" \
     -d "{
-      \"description\": \"JMeter Results | ${TEST_CASE} | ${RUN_ID} | $(date -u +%Y-%m-%d)\",
-      \"public\": false,
-      \"files\": {
-        \"summary.txt\": {
-          \"content\": ${SUMMARY_JSON}
-        },
-        \"test-results.jtl\": {
-          \"content\": ${JTL_CONTENT}
-        }
-      }
-    }" || echo "GIST_FAILED")
+      \"tag_name\": \"${RELEASE_TAG}\",
+      \"name\": \"${RELEASE_NAME}\",
+      \"body\": \"${RELEASE_BODY}\",
+      \"draft\": false,
+      \"prerelease\": true
+    }" 2>/dev/null || echo "FAILED")
 
-  if [ "${GIST_RESPONSE}" != "GIST_FAILED" ]; then
-    GIST_URL=$(echo "${GIST_RESPONSE}" | python3 -c "
+  if [ "${RELEASE_RESPONSE}" != "FAILED" ]; then
+    UPLOAD_URL=$(echo "${RELEASE_RESPONSE}" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+# strip the {?name,label} suffix
+url = d.get('upload_url', '').split('{')[0]
+print(url)
+" 2>/dev/null || echo "")
+
+    RELEASE_URL=$(echo "${RELEASE_RESPONSE}" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 print(d.get('html_url', 'unknown'))
 " 2>/dev/null || echo "unknown")
-    echo "========================================"
-    echo "  Results uploaded to GitHub Gist:"
-    echo "  ${GIST_URL}"
-    echo "========================================"
 
-    # Write gist URL to a file so it can be read by other processes
-    echo "${GIST_URL}" > "${RESULTS_DIR}/gist-url.txt"
+    if [ -n "${UPLOAD_URL}" ]; then
+      # Upload JTL file
+      curl -sf -X POST \
+        -H "Authorization: token ${GITHUB_PAT}" \
+        -H "Content-Type: text/plain" \
+        "${UPLOAD_URL}?name=test-results-${TEST_CASE}.jtl" \
+        --data-binary @"${RESULTS_DIR}/test-results.jtl" > /dev/null
+
+      echo "========================================"
+      echo "  Results uploaded:"
+      echo "  ${RELEASE_URL}"
+      echo "========================================"
+
+      # Save URL for pipeline to read
+      echo "${RELEASE_URL}" > "${RESULTS_DIR}/results-url.txt"
+    fi
   else
-    echo "WARNING: Failed to upload results to GitHub Gist"
+    echo "WARNING: Failed to create GitHub Release"
   fi
 else
-  echo "WARNING: GITHUB_PAT not set — skipping Gist upload"
+  echo "WARNING: GITHUB_PAT not set — skipping upload"
 fi
 
-# ── Exit with failure if any assertions failed ─────────────────────────────────
+# ── Exit ──────────────────────────────────────────────────────────────────────
 if [ "${FAILED}" -gt 0 ]; then
   echo "RESULT: FAIL — ${FAILED} assertion(s) failed"
   exit 1
