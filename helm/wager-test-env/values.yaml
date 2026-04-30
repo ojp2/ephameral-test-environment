@@ -105,3 +105,5 @@ jmeter:
     limits:
       cpu: 1000m
       memory: 1Gi
+vault:
+  enabled: true

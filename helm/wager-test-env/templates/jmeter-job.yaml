@@ -45,6 +45,25 @@ spec:
                 sleep 3
               done
               echo "wager-svc is reachable"
+
+        # Wait for Vault secret to be synced before starting JMeter
+        - name: wait-for-vault-secret
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for gh-devops-token secret from Vault..."
+              until [ -f /vault-secret/token ]; do
+                echo "  secret not ready, retrying in 3s..."
+                sleep 3
+              done
+              echo "Vault secret is ready"
+          volumeMounts:
+            - name: gh-pat
+              mountPath: /vault-secret
+              readOnly: true
+
       containers:
         - name: jmeter
           image: "{{ .Values.jmeter.image.repository }}:{{ .Values.jmeter.image.tag }}"
@@ -62,10 +81,23 @@ spec:
               value: {{ .Values.global.wagerAmount | quote }}
             - name: TEST_CASE
               value: {{ .Values.global.testCase | quote }}
-            - name: S3_BUCKET
-              value: {{ .Values.jmeter.s3Bucket | quote }}
-            - name: S3_PREFIX
-              value: "{{ .Values.jmeter.s3Prefix }}/{{ .Values.global.runId }}/{{ .Values.global.testCase }}"
+            - name: RUN_ID
+              value: {{ .Values.global.runId | quote }}
+            # GitHub PAT from Vault secret — key name must match what Vault stores
+            - name: GITHUB_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: gh-devops-token
+                  key: token
           resources:
             {{- toYaml .Values.jmeter.resources | nindent 12 }}
+          volumeMounts:
+            - name: gh-pat
+              mountPath: /vault-secret
+              readOnly: true
+
+      volumes:
+        - name: gh-pat
+          secret:
+            secretName: gh-devops-token
 {{- end }}

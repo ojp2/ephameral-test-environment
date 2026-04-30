@@ -19,17 +19,21 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
+  push:
+    branches:
+      - ephameral-tests
 
 concurrency:
   group: ephemeral-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:
-  ARGOCD_SERVER: YOUR_ARGOCD_SERVER     # <-- e.g. argocd.yourdomain.com
-  ECR_REGISTRY:  YOUR_ECR_REGISTRY      # <-- e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com
-  AWS_REGION:    YOUR_AWS_REGION        # <-- e.g. us-east-1
-  S3_BUCKET:     YOUR_S3_BUCKET         # <-- tools account bucket for test results
+  ARGOCD_SERVER: argocd-np-server.argocd.svc.cluster.local:80
+  ECR_REGISTRY:  
+  AWS_REGION:    us-east-1
+  #S3_BUCKET:    YOUR_S3_BUCKET
   IMAGE_TAG:     ${{ github.sha }}
+  ARGOCD_OPTS:   "--server argocd-np-server.argocd.svc.cluster.local:80 --auth-token ${{ secrets.ARGOCD_AUTH_TOKEN }} --plaintext --grpc-web"
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -37,7 +41,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   setup:
     name: Setup
-    runs-on: arc-runner-set
+    runs-on: arc-runners-sgisdevops
     outputs:
       test_case: ${{ steps.resolve.outputs.test_case }}
       namespace:  ${{ steps.resolve.outputs.namespace }}
@@ -49,6 +53,9 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             TEST_CASE="mega-millions"
             RUN_ID="pr-${{ github.event.pull_request.number }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            TEST_CASE="mega-millions"
+            RUN_ID="run-${{ github.run_id }}"
           else
             TEST_CASE="${{ github.event.inputs.test_case }}"
             RUN_ID="run-${{ github.run_id }}"
@@ -62,25 +69,21 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 2. Build and push images to ECR
-  #    wager-app    -- the app under test
-  #    wager-jmeter -- JMeter + test plan, runs as K8s Job inside the namespace
   # ─────────────────────────────────────────────────────────────────────────────
   build:
     name: Build and Push Images
-    runs-on: arc-runner-set
+    runs-on: arc-runners-sgisdevops
     needs: setup
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.AWS_REGION }}
-
-      - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Retrieve AWS Credentials from Vault
+        run: |
+          echo "Sleeping for 10 seconds..."
+          sleep 10
+          export AWS_ACCESS_KEY_ID=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.access_key} | base64 -d)
+          export AWS_SECRET_ACCESS_KEY=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.secret_key} | base64 -d)
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 891376915593.dkr.ecr.us-east-1.amazonaws.com
 
       - name: Build and push wager-app
         uses: docker/build-push-action@v5
@@ -88,31 +91,30 @@ jobs:
           context: ./app
           push: true
           platforms: linux/amd64
-          tags: ${{ env.ECR_REGISTRY }}/wager-app:${{ env.IMAGE_TAG }}
+          tags: ${{ env.ECR_REGISTRY }}:wager-app-${{ env.IMAGE_TAG }}
 
-      - name: Build and push wager-jmeter
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./jmeter-image/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: ${{ env.ECR_REGISTRY }}/wager-jmeter:${{ env.IMAGE_TAG }}
+      # - name: Build and push wager-jmeter
+      #   uses: docker/build-push-action@v5
+      #   with:
+      #     context: .
+      #     file: ./jmeter-image/Dockerfile
+      #     push: true
+      #     platforms: linux/amd64
+      #     tags: ${{ env.ECR_REGISTRY }}:wager-jmeter-${{ env.IMAGE_TAG }}
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 3. Provision via ArgoCD
-  #    Deploys: mysql, wiremock-gds, wiremock-esb, wager-svc, jmeter Job
-  #    No kubectl. No kubeconfig. ArgoCD API only.
   # ─────────────────────────────────────────────────────────────────────────────
   provision:
     name: Provision Ephemeral Env
-    runs-on: arc-runner-set
+    runs-on: arc-runners-sgisdevops
     needs: [setup, build]
     env:
       NAMESPACE: ${{ needs.setup.outputs.namespace }}
       TEST_CASE: ${{ needs.setup.outputs.test_case }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Install ArgoCD CLI
         run: |
           mkdir -p $HOME/.local/bin
@@ -123,49 +125,46 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           argocd version --client
 
-      - name: Login to ArgoCD
-        run: |
-          argocd login ${{ env.ARGOCD_SERVER }} \
-            --auth-token ${{ secrets.ARGOCD_AUTH_TOKEN }} \
-            --grpc-web \
-            --insecure
+      # - name: Login to ArgoCD
+      #   run: |
+      #     argocd login ${{ env.ARGOCD_SERVER }} \
+      #       --auth-token ${{ secrets.ARGOCD_AUTH_TOKEN }} \
+      #       --grpc-web \
+      #       --plaintext
 
       - name: Deploy via ArgoCD
         run: |
           VALUES_CASE=$(echo "${{ env.TEST_CASE }}" | tr '-' '_')
 
           argocd app create ${{ env.NAMESPACE }} \
+            ${{ env.ARGOCD_OPTS }} \
             --project wager-tests \
             --repo https://github.com/${{ github.repository }} \
             --revision ${{ github.sha }} \
             --path helm/wager-test-env \
-            --dest-server https://kubernetes.default.svc \
+            --dest-server  \
             --dest-namespace ${{ env.NAMESPACE }} \
             --values values.yaml \
             --values test-cases/${VALUES_CASE}-values.yaml \
-            --helm-set wagerSvc.image.repository=${{ env.ECR_REGISTRY }}/wager-app \
-            --helm-set wagerSvc.image.tag=${{ env.IMAGE_TAG }} \
+            --helm-set wagerSvc.image.repository=${{ env.ECR_REGISTRY }} \
+            --helm-set wagerSvc.image.tag=wager-app-${{ env.IMAGE_TAG }} \
             --helm-set wagerSvc.image.pullPolicy=Always \
-            --helm-set jmeter.image.repository=${{ env.ECR_REGISTRY }}/wager-jmeter \
-            --helm-set jmeter.image.tag=${{ env.IMAGE_TAG }} \
-            --helm-set jmeter.s3Bucket=${{ env.S3_BUCKET }} \
+            --helm-set jmeter.image.repository=${{ env.ECR_REGISTRY }} \
+            --helm-set jmeter.image.tag=wager-jmeter-${{ env.IMAGE_TAG }} \
             --helm-set global.runId=${{ needs.setup.outputs.run_id }} \
             --helm-set global.testCase=${{ env.TEST_CASE }} \
             --sync-policy automated \
             --auto-prune \
             --self-heal \
             --upsert \
-            --grpc-web \
-            --insecure
+            --sync-option CreateNamespace=true
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 4. Wait for JMeter Job, download results from S3
-  #    JMeter pod runs inside app cluster, writes to tools account S3 bucket
-  #    (app account node role has cross-account write via S3 bucket policy)
+  # 4. Wait for JMeter Job and collect results
   # ─────────────────────────────────────────────────────────────────────────────
   test:
     name: Run JMeter Tests
-    runs-on: arc-runner-set
+    runs-on: arc-runners-sgisdevops
     needs: [setup, provision]
     env:
       NAMESPACE: ${{ needs.setup.outputs.namespace }}
@@ -174,12 +173,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.AWS_REGION }}
+      - name: Retrieve AWS Credentials from Vault
+        run: |
+          echo "Sleeping for 10 seconds..."
+          sleep 10
+          export AWS_ACCESS_KEY_ID=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.access_key} | base64 -d)
+          export AWS_SECRET_ACCESS_KEY=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.secret_key} | base64 -d)
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 891376915593.dkr.ecr.us-east-1.amazonaws.com
+
       - name: Install ArgoCD CLI
         run: |
           mkdir -p $HOME/.local/bin
@@ -189,66 +190,117 @@ jobs:
           export PATH=$HOME/.local/bin:$PATH
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           argocd version --client
-      - name: Login to ArgoCD
-        run: |
-          argocd login ${{ env.ARGOCD_SERVER }} \
-            --auth-token ${{ secrets.ARGOCD_AUTH_TOKEN }} \
-            --grpc-web \
-            --insecure
+
+      # - name: Login to ArgoCD
+      #   run: |
+      #     argocd login ${{ env.ARGOCD_SERVER }} \
+      #       --auth-token ${{ secrets.ARGOCD_AUTH_TOKEN }} \
+      #       --grpc-web \
+      #       --plaintext
 
       - name: Wait for all services healthy
         run: |
           argocd app wait ${{ env.NAMESPACE }} \
+            ${{ env.ARGOCD_OPTS }} \
             --health \
-            --timeout 300 \
-            --grpc-web --insecure || {
-              argocd app get ${{ env.NAMESPACE }} --grpc-web --insecure
+            --timeout 300 || {
+              argocd app get ${{ env.NAMESPACE }} \
+                ${{ env.ARGOCD_OPTS }}
               exit 1
             }
 
+      # ── FIXED: polls ArgoCD JSON for JMeter Job health status ────────────────
       - name: Wait for JMeter Job to complete
         run: |
-          echo "Polling JMeter Job status (max 10 mins)..."
+          echo "Polling JMeter Job status via ArgoCD (max 10 mins)..."
           STATUS="unknown"
+
           for i in $(seq 1 40); do
-            STATUS=$(argocd app resources ${{ env.NAMESPACE }} \
-              --grpc-web --insecure \
-              --kind Job 2>/dev/null \
-              | grep "jmeter" | awk '{print $6}' || echo "unknown")
+            STATUS=$(argocd app get ${{ env.NAMESPACE }} \
+              ${{ env.ARGOCD_OPTS }} \
+              --output json 2>/dev/null \
+              | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    for r in d.get('status', {}).get('resources', []):
+        if r.get('name') == 'jmeter' and r.get('kind') == 'Job':
+            h = r.get('health', {}).get('status', '')
+            s = r.get('status', '')
+            print(h if h else s)
+            sys.exit(0)
+    print('unknown')
+except:
+    print('unknown')
+" 2>/dev/null || echo "unknown")
 
-            echo "Attempt ${i}/40 — status: ${STATUS}"
+            echo "Attempt ${i}/40 — JMeter Job status: ${STATUS}"
 
-            if [ "${STATUS}" = "Succeeded" ]; then
+            if [ "${STATUS}" = "Healthy" ] || [ "${STATUS}" = "Succeeded" ]; then
               echo "JMeter Job completed successfully"
               break
             fi
 
-            if [ "${STATUS}" = "Failed" ]; then
+            if [ "${STATUS}" = "Degraded" ] || [ "${STATUS}" = "Failed" ]; then
               echo "ERROR: JMeter Job failed"
-              argocd app get ${{ env.NAMESPACE }} --grpc-web --insecure
+              argocd app get ${{ env.NAMESPACE }} ${{ env.ARGOCD_OPTS }}
               exit 1
             fi
 
             sleep 15
           done
 
-          if [ "${STATUS}" != "Succeeded" ]; then
+          if [[ "${STATUS}" != "Healthy" && "${STATUS}" != "Succeeded" ]]; then
             echo "ERROR: JMeter Job timed out after 10 minutes"
+            argocd app get ${{ env.NAMESPACE }} ${{ env.ARGOCD_OPTS }}
             exit 1
           fi
 
-      - name: Download results from S3
+      # ── NEW: fetch Gist URL that JMeter pod uploaded results to ──────────────
+      - name: Get test results Gist URL
+        if: always()
         run: |
-          S3_PREFIX="wager-test-results/${{ env.RUN_ID }}/${{ env.TEST_CASE }}"
-          mkdir -p results/html-report
+          echo "Fetching Gist URL from JMeter results ConfigMap..."
 
-          aws s3 cp \
-            "s3://${{ env.S3_BUCKET }}/${S3_PREFIX}/test-results.jtl" \
-            results/test-results.jtl
+          GIST_URL=$(argocd app get ${{ env.NAMESPACE }} \
+            ${{ env.ARGOCD_OPTS }} \
+            --output json 2>/dev/null \
+            | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    for r in d.get('status', {}).get('resources', []):
+        if r.get('name') == 'jmeter-gist-url' and r.get('kind') == 'ConfigMap':
+            print(r.get('liveState', {}).get('data', {}).get('url', 'not-found'))
+            sys.exit(0)
+    print('not-found')
+except:
+    print('not-found')
+" 2>/dev/null || echo "not-found")
 
-          aws s3 sync \
-            "s3://${{ env.S3_BUCKET }}/${S3_PREFIX}/html-report/" \
-            results/html-report/
+          echo "========================================"
+          echo "  Test Run Summary"
+          echo "  Test case : ${{ env.TEST_CASE }}"
+          echo "  Run ID    : ${{ env.RUN_ID }}"
+          if [ "${GIST_URL}" != "not-found" ] && [ -n "${GIST_URL}" ]; then
+            echo "  Results   : ${GIST_URL}"
+          else
+            echo "  Results   : Check GitHub Gists for run-${{ env.RUN_ID }}"
+            echo "  Gist link : https://gist.github.com"
+          fi
+          echo "========================================"
+
+      # ── S3 download commented out — uncomment when S3 is configured ──────────
+      # - name: Download results from S3
+      #   run: |
+      #     S3_PREFIX="wager-test-results/${{ env.RUN_ID }}/${{ env.TEST_CASE }}"
+      #     mkdir -p results/html-report
+      #     aws s3 cp \
+      #       "s3://${{ env.S3_BUCKET }}/${S3_PREFIX}/test-results.jtl" \
+      #       results/test-results.jtl
+      #     aws s3 sync \
+      #       "s3://${{ env.S3_BUCKET }}/${S3_PREFIX}/html-report/" \
+      #       results/html-report/
 
       - name: Validate results
         run: |
@@ -274,7 +326,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   teardown:
     name: Teardown Ephemeral Env
-    runs-on: arc-runner-set
+    runs-on: arc-runners-sgisdevops
     needs: [setup, test]
     if: always()
     env:
@@ -282,12 +334,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.AWS_REGION }}
+      - name: Retrieve AWS Credentials from Vault
+        run: |
+          echo "Sleeping for 10 seconds..."
+          sleep 10
+          export AWS_ACCESS_KEY_ID=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.access_key} | base64 -d)
+          export AWS_SECRET_ACCESS_KEY=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.secret_key} | base64 -d)
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 891376915593.dkr.ecr.us-east-1.amazonaws.com
+
       - name: Install ArgoCD CLI
         run: |
           mkdir -p $HOME/.local/bin
@@ -297,12 +351,13 @@ jobs:
           export PATH=$HOME/.local/bin:$PATH
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           argocd version --client
-      - name: Login to ArgoCD
-        run: |
-          argocd login ${{ env.ARGOCD_SERVER }} \
-            --auth-token ${{ secrets.ARGOCD_AUTH_TOKEN }} \
-            --grpc-web \
-            --insecure
+
+      # - name: Login to ArgoCD
+      #   run: |
+      #     argocd login ${{ env.ARGOCD_SERVER }} \
+      #       --auth-token ${{ secrets.ARGOCD_AUTH_TOKEN }} \
+      #       --grpc-web \
+      #       --plaintext
 
       - name: Delete all ephemeral ArgoCD apps
         run: |
@@ -310,25 +365,27 @@ jobs:
             local APP="$1"
             echo "--- Deleting: $APP"
             argocd app delete "$APP" \
-              --yes \
-              --grpc-web --insecure 2>/dev/null || true
+              ${{ env.ARGOCD_OPTS }} \
+              --yes 2>/dev/null || true
           }
 
           delete_argocd_app "${{ env.NAMESPACE }}"
 
           argocd app list \
-            --grpc-web --insecure \
+            ${{ env.ARGOCD_OPTS }} \
             --output name 2>/dev/null \
             | grep "^wager-test-" \
             | while read APP; do
                 delete_argocd_app "$APP"
               done
 
-          argocd app list --grpc-web --insecure 2>/dev/null \
+          argocd app list \
+            ${{ env.ARGOCD_OPTS }} \
+            2>/dev/null \
             | grep wager || echo "No wager apps remain"
 
-      - name: Clean up S3 results
-        run: |
-          aws s3 rm \
-            "s3://${{ env.S3_BUCKET }}/wager-test-results/${{ needs.setup.outputs.run_id }}/" \
-            --recursive 2>/dev/null || echo "S3 cleanup skipped"
+      # - name: Clean up S3 results
+      #   run: |
+      #     aws s3 rm \
+      #       "s3://${{ env.S3_BUCKET }}/wager-test-results/${{ needs.setup.outputs.run_id }}/" \
+      #       --recursive 2>/dev/null || echo "S3 cleanup skipped"

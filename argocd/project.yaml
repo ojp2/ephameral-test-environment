@@ -44,6 +44,12 @@ spec:
       kind: NetworkPolicy
     - group: ''
       kind: ResourceQuota
+    - group: secrets.hashicorp.com
+      kind: VaultConnection
+    - group: secrets.hashicorp.com
+      kind: VaultAuth
+    - group: secrets.hashicorp.com
+      kind: VaultStaticSecret
 
   roles:
     - name: ci-deployer
