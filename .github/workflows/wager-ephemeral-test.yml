@@ -237,7 +237,7 @@ jobs:
             sleep 10
           done
 
-          if [ "${STATUS}" != "Succeeded" ]; then
+          if [[ "${STATUS}" != "Succeeded" && "${STATUS}" != "Healthy" ]]; then
             echo "ERROR: JMeter Job timed out"
             argocd app get ${{ env.NAMESPACE }} ${{ env.ARGOCD_OPTS }}
             exit 1
@@ -285,7 +285,7 @@ jobs:
       #   with:
       #     name: jmeter-jtl-${{ env.TEST_CASE }}-${{ env.RUN_ID }}
       #     path: results/test-results.jtl
-
+  teardown:
     name: Teardown Ephemeral Env
     runs-on: arc-runners-sgisdevops
     needs: [setup, test]
