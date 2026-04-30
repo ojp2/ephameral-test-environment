@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# run-tests.sh
-# Runs JMeter test plan, uploads JTL + HTML report zip to GitHub Release
-
 set -euo pipefail
 
 : "${BASE_URL:?BASE_URL is required}"
+: "${SERVER_HOST:?SERVER_HOST is required}"
+: "${SERVER_PORT:?SERVER_PORT is required}"
 : "${GAME_CODE:?GAME_CODE is required}"
 : "${EXPECTED_STATUS:?EXPECTED_STATUS is required}"
 : "${EXPECTED_RESULT:?EXPECTED_RESULT is required}"
@@ -22,6 +21,8 @@ echo "  Wager JMeter Test"
 echo "  Test case   : ${TEST_CASE}"
 echo "  Game code   : ${GAME_CODE}"
 echo "  Target URL  : ${BASE_URL}"
+echo "  Server host : ${SERVER_HOST}"
+echo "  Server port : ${SERVER_PORT}"
 echo "  Expected    : HTTP ${EXPECTED_STATUS} / ${EXPECTED_RESULT}"
 echo "========================================"
 
@@ -48,6 +49,8 @@ jmeter -n \
   -l  "${RESULTS_DIR}/test-results.jtl" \
   -e -o "${RESULTS_DIR}/html-report" \
   -JBASE_URL="${BASE_URL}" \
+  -JSERVER_HOST="${SERVER_HOST}" \
+  -JSERVER_PORT="${SERVER_PORT}" \
   -JGAME_CODE="${GAME_CODE}" \
   -JEXPECTED_STATUS="${EXPECTED_STATUS}" \
   -JEXPECTED_RESULT="${EXPECTED_RESULT}" \
