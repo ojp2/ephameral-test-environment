@@ -83,7 +83,14 @@ Game: ${GAME_CODE}
 Expected: HTTP ${EXPECTED_STATUS} / ${EXPECTED_RESULT}
 Results: ${PASSED}/${TOTAL} passed | ${FAILED} failed"
 
-  RELEASE_RESPONSE=$(curl -sf -X POST \
+  # Debug — print PAT length and first/last chars to verify it's clean
+  PAT_LEN=${#GITHUB_PAT}
+  PAT_PREVIEW="${GITHUB_PAT:0:4}...${GITHUB_PAT: -4}"
+  echo "PAT length: ${PAT_LEN} | preview: ${PAT_PREVIEW}"
+  echo "Repo: ${GITHUB_REPO}"
+  echo "Tag: ${RELEASE_TAG}"
+
+  RELEASE_RESPONSE=$(curl -s -X POST \
     -H "Authorization: token ${GITHUB_PAT}" \
     -H "Content-Type: application/json" \
     "https://api.github.com/repos/${GITHUB_REPO}/releases" \
@@ -93,9 +100,11 @@ Results: ${PASSED}/${TOTAL} passed | ${FAILED} failed"
       \"body\": \"${RELEASE_BODY}\",
       \"draft\": false,
       \"prerelease\": true
-    }" 2>/dev/null || echo "FAILED")
+    }" 2>&1)
 
-  if [ "${RELEASE_RESPONSE}" != "FAILED" ]; then
+  echo "Release API response: ${RELEASE_RESPONSE}"
+
+  if echo "${RELEASE_RESPONSE}" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if 'html_url' in d else 1)" 2>/dev/null; then
     UPLOAD_URL=$(echo "${RELEASE_RESPONSE}" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
