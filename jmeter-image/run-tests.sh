@@ -133,16 +133,27 @@ print(d.get('html_url', 'unknown'))
         --data-binary @"${RESULTS_DIR}/test-results.jtl" > /dev/null
       echo "JTL uploaded"
 
-      # Zip and upload HTML report
+      # Zip and upload HTML report using python zipfile (no zip binary needed)
       if [ -d "${RESULTS_DIR}/html-report" ]; then
         (
-          cd "${RESULTS_DIR}" && \
-          zip -r html-report.zip html-report/ > /dev/null 2>&1 && \
+          python3 -c "
+import zipfile, os, sys
+results_dir = '${RESULTS_DIR}'
+zip_path = os.path.join(results_dir, 'html-report.zip')
+html_dir = os.path.join(results_dir, 'html-report')
+with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+    for root, dirs, files in os.walk(html_dir):
+        for file in files:
+            filepath = os.path.join(root, file)
+            arcname = os.path.relpath(filepath, results_dir)
+            zf.write(filepath, arcname)
+print('zip created')
+" && \
           curl -sf -X POST \
             -H "Authorization: token ${GITHUB_PAT}" \
             -H "Content-Type: application/zip" \
             "${UPLOAD_URL}?name=html-report-${TEST_CASE}.zip" \
-            --data-binary @html-report.zip > /dev/null && \
+            --data-binary @"${RESULTS_DIR}/html-report.zip" > /dev/null && \
           echo "HTML report zip uploaded"
         ) || echo "WARNING: HTML report upload failed — continuing"
       fi
