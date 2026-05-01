@@ -90,17 +90,24 @@ Results: ${PASSED}/${TOTAL} passed | ${FAILED} failed"
   echo "Repo: ${GITHUB_REPO}"
   echo "Tag: ${RELEASE_TAG}"
 
+  # Build JSON payload using python to handle special chars and newlines safely
+  JSON_PAYLOAD=$(python3 -c "
+import json
+payload = {
+    'tag_name': '${RELEASE_TAG}',
+    'name': '${RELEASE_NAME}',
+    'body': 'Test Case: ${TEST_CASE}\\nRun ID: ${RUN_ID}\\nGame: ${GAME_CODE}\\nExpected: HTTP ${EXPECTED_STATUS} / ${EXPECTED_RESULT}\\nResults: ${PASSED}/${TOTAL} passed | ${FAILED} failed',
+    'draft': False,
+    'prerelease': True
+}
+print(json.dumps(payload))
+")
+
   RELEASE_RESPONSE=$(curl -s -X POST \
     -H "Authorization: token ${GITHUB_PAT}" \
     -H "Content-Type: application/json" \
     "https://api.github.com/repos/${GITHUB_REPO}/releases" \
-    -d "{
-      \"tag_name\": \"${RELEASE_TAG}\",
-      \"name\": \"${RELEASE_NAME}\",
-      \"body\": \"${RELEASE_BODY}\",
-      \"draft\": false,
-      \"prerelease\": true
-    }" 2>&1)
+    -d "${JSON_PAYLOAD}" 2>&1)
 
   echo "Release API response: ${RELEASE_RESPONSE}"
 
