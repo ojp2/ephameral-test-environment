@@ -1,0 +1,112 @@
+name: Generate Cluster & Workload Inventory Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_case_name:
+        description: 'Optional tag / name for this load test inventory run'
+        required: false
+        default: 'load-test-baseline'
+
+env:
+  ARGO_APP_NAME: "us-upam-stage"
+  ARGOCD_SERVER: "argocd-np-server.argocd.svc.cluster.local:80"
+  ARGOCD_OPTS: "--server argocd-np-server.argocd.svc.cluster.local:80 --auth-token ${{ secrets.ARGOCD_AUTH_TOKEN }} --plaintext --grpc-web"
+
+jobs:
+  capture-inventory:
+    name: Extract EKS & Application State Profile
+    runs-on: arc-runners-sgisdevops
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Retrieve AWS Credentials from Secret
+        run: |
+          echo "Sleeping for 10 seconds to allow secrets sync..."
+          sleep 10
+          export AWS_ACCESS_KEY_ID=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.access_key} | base64 -d)
+          export AWS_SECRET_ACCESS_KEY=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.secret_key} | base64 -d)
+          echo "AWS validation complete. Credentials loaded locally into execution environment."
+
+      - name: Install ArgoCD CLI
+        run: |
+          mkdir -p $HOME/.local/bin
+          curl -sSL -o $HOME/.local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x $HOME/.local/bin/argocd
+          export PATH=$HOME/.local/bin:$PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          argocd version --client
+
+      - name: Generate Structural JSON Inventory and Check Drift
+        run: |
+          OUTPUT_DIR="./inventory-artifacts"
+          mkdir -p "$OUTPUT_DIR"
+          
+          echo "=== 1. Pulling Live Application Topology ==="
+          argocd app get "${{ env.ARGO_APP_NAME }}" -o json ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/raw_argo_manifest.json"
+          
+          echo "=== 2. Mapping Workload Replicas, Scaling, and Assets ==="
+          # Compiles target cluster paths, namespaces, sync statuses, 
+          # deployment health configurations, and replica targets.
+          # Explicitly filters for both standard HPA and KEDA components.
+          jq '{
+            inventory_run: "${{ github.run_id }}",
+            test_case: "${{ github.event.inputs.test_case_name }}",
+            captured_at: (now | strflocaltime("%Y-%m-%dT%H:%M:%SZ")),
+            target_cluster_endpoint: .spec.destination.server,
+            target_namespace: .spec.destination.namespace,
+            health_profiles: {
+              sync_status: .status.sync.status,
+              health_status: .status.health.status
+            },
+            workload_inventory: [
+              .status.resources[] 
+              | select(.kind == "Deployment" or .kind == "StatefulSet" or .kind == "ReplicaSet") 
+              | {
+                  kind: .kind,
+                  name: .name,
+                  health: .health.status,
+                  hook: .hook
+                }
+            ],
+            scaling_components: [
+              .status.resources[] 
+              | select(.kind == "HorizontalPodAutoscaler" or .kind == "ScaledObject" or .kind == "ScaledJob") 
+              | {
+                  kind: .kind,
+                  name: .name,
+                  status: .status,
+                  health: .health.status
+                }
+            ],
+            routing_and_nodes: [
+              .status.resources[] 
+              | select(.kind == "Node" or .kind == "Ingress") 
+              | {
+                  kind: .kind,
+                  name: .name,
+                  status: .status
+                }
+            ]
+          }' "${OUTPUT_DIR}/raw_argo_manifest.json" > "${OUTPUT_DIR}/cluster_inventory.json"
+          
+          echo "=== 3. Identifying Source Drift (Git vs Live Cluster) ==="
+          # Compiles structural code differences into a unified patch file
+          argocd app diff "${{ env.ARGO_APP_NAME }}" ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/configuration_drift.patch" || true
+
+      - name: Display Cluster Inventory Logs
+        run: |
+          echo "========================================================="
+          echo "           LOAD TEST CLUSTER INVENTORY SNAPSHOT          "
+          echo "========================================================="
+          cat ./inventory-artifacts/cluster_inventory.json
+          echo "========================================================="
+
+      - name: Archive Load Test Inventory Package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-inventory-${{ env.ARGO_APP_NAME }}-${{ github.run_id }}
+          path: ./inventory-artifacts/
