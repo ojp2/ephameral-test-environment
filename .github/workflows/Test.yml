@@ -21,14 +21,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Retrieve AWS Credentials from Secret
-        run: |
-          echo "Sleeping for 10 seconds to allow secrets sync..."
-          sleep 10
-          export AWS_ACCESS_KEY_ID=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.access_key} | base64 -d)
-          export AWS_SECRET_ACCESS_KEY=$(kubectl get secrets platform-services-ecr-iam-credentials -o jsonpath={.data.secret_key} | base64 -d)
-          echo "AWS validation complete. Credentials loaded locally into execution environment."
-
       - name: Install ArgoCD CLI
         run: |
           mkdir -p $HOME/.local/bin
@@ -44,29 +36,30 @@ jobs:
           OUTPUT_DIR="./inventory-artifacts"
           mkdir -p "$OUTPUT_DIR"
           
-          echo "=== 1. Pulling ArgoCD Top-Level Manifests ==="
+          echo "=== 1. Pulling ArgoCD Config Metadata ==="
           argocd app get "${{ env.ARGO_APP_NAME }}" -o json ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/raw_argo_manifest.json"
           
-          echo "=== 2. Proxying Remote Cluster for Live Runtime State ==="
-          argocd app manifests "${{ env.ARGO_APP_NAME }}" --live -o json ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/live_kubernetes_state.json"
+          echo "=== 2. Proxying Remote Cluster for Live Runtime Manifests ==="
+          # FIXED: Replaced invalid '--live' flag with native '--source live' flag to pull multi-object JSON
+          argocd app manifests "${{ env.ARGO_APP_NAME }}" --source live -o json ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/live_kubernetes_state.json"
           
           echo "=== 3. Processing Granular Cluster Inventory ==="
-          # FIXED: Switched --slurpfile target syntax to explicitly ingest the dynamic un-slurped stream of live objects safely
-          jq -s --slurpfile live "${OUTPUT_DIR}/live_kubernetes_state.json" '
-            $live[0] as $live_objects | {
+          # Ingests the raw, un-slurped object stream from the live proxy into a clean JSON array
+          jq -s --slurpfile target_meta "${OUTPUT_DIR}/raw_argo_manifest.json" '
+            $target_meta[0] as $meta | {
             inventory_run: "${{ github.run_id }}",
             test_case: "${{ github.event.inputs.test_case_name }}",
             captured_at: (now | strflocaltime("%Y-%m-%dT%H:%M:%SZ")),
-            target_cluster_endpoint: .spec.destination.server,
-            target_namespace: .spec.destination.namespace,
+            target_cluster_endpoint: $meta.spec.destination.server,
+            target_namespace: $meta.spec.destination.namespace,
             health_profiles: {
-              sync_status: .status.sync.status,
-              health_status: .status.health.status
+              sync_status: $meta.status.sync.status,
+              health_status: $meta.status.health.status
             },
             
-            # EXTRACTS LIVE RUNNING REPLICAS FROM DEPLOYMENTS
+            # EXTRACTS REPLICAS DIRECTLY FROM LIVE PROXY MANIFESTS
             workload_replicas: [
-              $live_objects[]
+              .[]
               | select(.kind == "Deployment" or .kind == "StatefulSet") 
               | {
                   kind: .kind,
@@ -77,9 +70,9 @@ jobs:
                 }
             ],
             
-            # EXTRACTS RAW INDIVIDUAL POD INFORMATION AND ASSIGNED NODES
+            # EXTRACTS LIVE RUNNING PODS & ASSIGNED PARENT HOST NODES
             running_pods: [
-              $live_objects[]
+              .[]
               | select(.kind == "Pod") 
               | {
                   pod_name: .metadata.name,
@@ -89,9 +82,9 @@ jobs:
                 }
             ],
             
-            # EXTRACTS ALL MANAGED KEDA & HPA SCALING PROFILES
+            # FILTERS FOR CURRENT SCALING STATUSES (HPA & KEDA)
             scaling_components: [
-              .status.resources[] 
+              $meta.status.resources[] 
               | select(.kind == "HorizontalPodAutoscaler" or .kind == "ScaledObject" or .kind == "ScaledJob") 
               | {
                   kind: .kind,
@@ -101,9 +94,9 @@ jobs:
                 }
             ],
             
-            # TRACKS PHYSICAL NODES, CAPACITY SPECIFICATIONS, AND INSTANCE TYPES
+            # CAPTURES REGISTERED CORE COMPUTE CLUSTER WORKER NODES
             node_infrastructure: [
-              $live_objects[]
+              .[]
               | select(.kind == "Node") 
               | {
                   node_name: .metadata.name,
@@ -120,7 +113,7 @@ jobs:
                   }
                 }
             ]
-          }' "${OUTPUT_DIR}/raw_argo_manifest.json" > "${OUTPUT_DIR}/cluster_inventory.json"
+          }' "${OUTPUT_DIR}/live_kubernetes_state.json" > "${OUTPUT_DIR}/cluster_inventory.json"
           
           echo "=== 4. Identifying Source Drift (Git vs Live Cluster) ==="
           argocd app diff "${{ env.ARGO_APP_NAME }}" ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/configuration_drift.patch" || true
