@@ -44,14 +44,15 @@ jobs:
           OUTPUT_DIR="./inventory-artifacts"
           mkdir -p "$OUTPUT_DIR"
           
-          echo "=== 1. Pulling Live Application Topology ==="
+          echo "=== 1. Pulling ArgoCD Top-Level Manifests ==="
           argocd app get "${{ env.ARGO_APP_NAME }}" -o json ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/raw_argo_manifest.json"
           
-          echo "=== 2. Mapping Workload Replicas, Scaling, and Assets ==="
-          # Compiles target cluster paths, namespaces, sync statuses, 
-          # deployment health configurations, and replica targets.
-          # Explicitly filters for both standard HPA and KEDA components.
-          jq '{
+          echo "=== 2. Proxying Remote Cluster for Live Runtime State ==="
+          argocd app manifests "${{ env.ARGO_APP_NAME }}" --live -o json ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/live_kubernetes_state.json"
+          
+          echo "=== 3. Processing Granular Cluster Inventory ==="
+          # Merges tracking metadata with dynamic live states (replicas, pods, node properties) pulled from the cluster proxy
+          jq --slurpfile live "${OUTPUT_DIR}/live_kubernetes_state.json" '{
             inventory_run: "${{ github.run_id }}",
             test_case: "${{ github.event.inputs.test_case_name }}",
             captured_at: (now | strflocaltime("%Y-%m-%dT%H:%M:%SZ")),
@@ -61,16 +62,33 @@ jobs:
               sync_status: .status.sync.status,
               health_status: .status.health.status
             },
-            workload_inventory: [
-              .status.resources[] 
-              | select(.kind == "Deployment" or .kind == "StatefulSet" or .kind == "ReplicaSet") 
+            
+            # EXTRACTS LIVE RUNNING REPLICAS FROM DEPLOYMENTS
+            workload_replicas: [
+              $live[] | .[] 
+              | select(.kind == "Deployment" or .kind == "StatefulSet") 
               | {
                   kind: .kind,
-                  name: .name,
-                  health: .health.status,
-                  hook: .hook
+                  name: .metadata.name,
+                  desired_replicas: (.spec.replicas // 0),
+                  ready_replicas: (.status.readyReplicas // 0),
+                  available_replicas: (.status.availableReplicas // 0)
                 }
             ],
+            
+            # EXTRACTS RAW INDIVIDUAL POD INFORMATION AND ASSIGNED NODES
+            running_pods: [
+              $live[] | .[] 
+              | select(.kind == "Pod") 
+              | {
+                  pod_name: .metadata.name,
+                  phase: .status.phase,
+                  node_assigned: .spec.nodeName,
+                  containers: [.spec.containers[].name]
+                }
+            ],
+            
+            # EXTRACTS ALL MANAGED KEDA & HPA SCALING PROFILES
             scaling_components: [
               .status.resources[] 
               | select(.kind == "HorizontalPodAutoscaler" or .kind == "ScaledObject" or .kind == "ScaledJob") 
@@ -81,19 +99,29 @@ jobs:
                   health: .health.status
                 }
             ],
-            routing_and_nodes: [
-              .status.resources[] 
-              | select(.kind == "Node" or .kind == "Ingress") 
+            
+            # TRACKS PHYSICAL NODES, CAPACITY SPECIFICATIONS, AND INSTANCE TYPES
+            node_infrastructure: [
+              $live[] | .[] 
+              | select(.kind == "Node") 
               | {
-                  kind: .kind,
-                  name: .name,
-                  status: .status
+                  node_name: .metadata.name,
+                  instance_type: (.metadata.labels["beta.kubernetes.io/instance-type"] // .metadata.labels["node.kubernetes.io/instance-type"] // "unknown"),
+                  aws_zone: (.metadata.labels["topology.kubernetes.io/zone"] // "unknown"),
+                  capacity: {
+                    cpu: .status.capacity.cpu,
+                    memory: .status.capacity.memory,
+                    pods_max: .status.capacity.pods
+                  },
+                  allocatable: {
+                    cpu: .status.allocatable.cpu,
+                    memory: .status.allocatable.memory
+                  }
                 }
             ]
           }' "${OUTPUT_DIR}/raw_argo_manifest.json" > "${OUTPUT_DIR}/cluster_inventory.json"
           
-          echo "=== 3. Identifying Source Drift (Git vs Live Cluster) ==="
-          # Compiles structural code differences into a unified patch file
+          echo "=== 4. Identifying Source Drift (Git vs Live Cluster) ==="
           argocd app diff "${{ env.ARGO_APP_NAME }}" ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/configuration_drift.patch" || true
 
       - name: Display Cluster Inventory Logs
