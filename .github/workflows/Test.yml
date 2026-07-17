@@ -51,8 +51,9 @@ jobs:
           argocd app manifests "${{ env.ARGO_APP_NAME }}" --live -o json ${{ env.ARGOCD_OPTS }} > "${OUTPUT_DIR}/live_kubernetes_state.json"
           
           echo "=== 3. Processing Granular Cluster Inventory ==="
-          # Merges tracking metadata with dynamic live states (replicas, pods, node properties) pulled from the cluster proxy
-          jq --slurpfile live "${OUTPUT_DIR}/live_kubernetes_state.json" '{
+          # FIXED: Switched --slurpfile target syntax to explicitly ingest the dynamic un-slurped stream of live objects safely
+          jq -s --slurpfile live "${OUTPUT_DIR}/live_kubernetes_state.json" '
+            $live[0] as $live_objects | {
             inventory_run: "${{ github.run_id }}",
             test_case: "${{ github.event.inputs.test_case_name }}",
             captured_at: (now | strflocaltime("%Y-%m-%dT%H:%M:%SZ")),
@@ -65,7 +66,7 @@ jobs:
             
             # EXTRACTS LIVE RUNNING REPLICAS FROM DEPLOYMENTS
             workload_replicas: [
-              $live[] | .[] 
+              $live_objects[]
               | select(.kind == "Deployment" or .kind == "StatefulSet") 
               | {
                   kind: .kind,
@@ -78,13 +79,13 @@ jobs:
             
             # EXTRACTS RAW INDIVIDUAL POD INFORMATION AND ASSIGNED NODES
             running_pods: [
-              $live[] | .[] 
+              $live_objects[]
               | select(.kind == "Pod") 
               | {
                   pod_name: .metadata.name,
                   phase: .status.phase,
                   node_assigned: .spec.nodeName,
-                  containers: [.spec.containers[].name]
+                  containers: [try .spec.containers[].name catch []]
                 }
             ],
             
@@ -102,7 +103,7 @@ jobs:
             
             # TRACKS PHYSICAL NODES, CAPACITY SPECIFICATIONS, AND INSTANCE TYPES
             node_infrastructure: [
-              $live[] | .[] 
+              $live_objects[]
               | select(.kind == "Node") 
               | {
                   node_name: .metadata.name,
