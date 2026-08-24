@@ -1,0 +1,23 @@
+READ-ONLY investigation. Do not modify Kubernetes or Elasticsearch.
+
+Determine exactly why each es-prosearch-data Elasticsearch 6.2.3 JVM reports allocated_processors=1 while the Kubernetes container has a 2500m CPU request/limit.
+
+Check:
+- Elasticsearch node.processors configuration
+- elasticsearch.yml
+- JVM startup arguments
+- container CPU cgroup quota and period
+- Java version
+- what Runtime.availableProcessors() would return inside the container
+- Kubernetes CPU limits
+- Helm/manifests/configmaps/environment variables
+- whether this Elasticsearch/Java version understands container CPU quotas correctly
+
+Show the evidence and identify whether allocated_processors=1 comes from:
+1. explicit Elasticsearch configuration,
+2. JVM/container CPU detection,
+3. cgroup rounding,
+4. Kubernetes CPU limit,
+5. another cause.
+
+Do not change anything.
