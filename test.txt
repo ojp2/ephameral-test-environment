@@ -1,23 +1,81 @@
-READ-ONLY investigation. Do not modify Kubernetes or Elasticsearch.
+Continue READ-ONLY investigation only. Do not modify Kubernetes, Elasticsearch, applications, jobs, or configuration.
 
-Determine exactly why each es-prosearch-data Elasticsearch 6.2.3 JVM reports allocated_processors=1 while the Kubernetes container has a 2500m CPU request/limit.
+We have established that Elasticsearch search thread-pool saturation caused the user-visible failure around 08:35-08:38 EDT.
 
-Check:
-- Elasticsearch node.processors configuration
-- elasticsearch.yml
-- JVM startup arguments
-- container CPU cgroup quota and period
-- Java version
-- what Runtime.availableProcessors() would return inside the container
-- Kubernetes CPU limits
-- Helm/manifests/configmaps/environment variables
-- whether this Elasticsearch/Java version understands container CPU quotas correctly
+Now investigate WHY this happened specifically today around 08:33 EDT.
 
-Show the evidence and identify whether allocated_processors=1 comes from:
-1. explicit Elasticsearch configuration,
-2. JVM/container CPU detection,
-3. cgroup rounding,
-4. Kubernetes CPU limit,
-5. another cause.
+Important:
+- Do not spend time re-proving that the search queue saturated.
+- Treat allocated_processors=1 / search pool size=2 as an underlying capacity weakness.
+- The goal now is to identify the workload/query/application trigger that caused the queue to begin growing around 08:33.
+- Do not assume a traffic spike, because observed search request rate only increased modestly.
 
-Do not change anything.
+Correlate the window 08:25-08:40 EDT (12:25-12:40 UTC).
+
+Investigate read-only:
+
+1. Search ProSite/provider application logs for activity beginning around 08:32-08:34.
+   Look for:
+   - bill searches
+   - reports
+   - batch operations
+   - scheduled jobs
+   - retries
+   - repeated correlation IDs
+   - repeated Elasticsearch query endpoints
+   - unusually high request counts from one route/user/service
+
+2. Analyze es-prosearch-client nginx access logs for 08:25-08:40.
+   Group requests by:
+   - Elasticsearch URI/index
+   - request path
+   - source IP if available
+   - HTTP method
+   - response/request duration
+   - status
+   - client pod
+
+   Identify which request types increased in count or latency starting around 08:33.
+
+3. Compare two windows:
+   BASELINE: 08:25-08:32
+   INCIDENT BUILDUP: 08:33-08:38
+
+   Show:
+   - total search requests
+   - requests/sec
+   - average latency
+   - p95/max latency if derivable
+   - most frequent endpoint/query type
+   - biggest change between windows
+
+4. Look for individual requests taking seconds instead of the normal baseline.
+   Determine whether queue growth was driven primarily by:
+   A. more queries,
+   B. slower queries,
+   C. both.
+
+5. Check Kubernetes CronJobs/jobs and application schedules that ran around 08:30-08:35.
+   Include any report-generation, indexing, synchronization, billing, or batch jobs.
+
+6. Check prosearch-indexer activity around the same time and determine whether indexing/write workload increased concurrently.
+
+7. Search historical logs from previous days around the same clock time (08:25-08:40) if available.
+   Determine whether this workload regularly runs at approximately 08:30 and whether queue/rejection patterns occurred previously without user-visible impact.
+
+8. Look for retry amplification:
+   determine whether initial slow Elasticsearch requests caused the application to retry, thereby increasing Elasticsearch demand.
+
+9. If query bodies are logged safely, identify the expensive query/query pattern. Do not expose credentials, PHI, or sensitive payload data in the report.
+
+At the end provide:
+
+A. What changed beginning around 08:33
+B. Best-supported incident trigger
+C. Whether demand increased, query duration increased, or both
+D. Which application/job/query generated the additional search work
+E. Why the same configuration may have operated normally before today
+F. Evidence supporting the trigger
+G. Missing evidence if the trigger cannot be definitively identified
+
+Do not make any changes.
