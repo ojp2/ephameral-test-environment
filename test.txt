@@ -1,81 +1,11 @@
-Continue READ-ONLY investigation only. Do not modify Kubernetes, Elasticsearch, applications, jobs, or configuration.
+I finished correlating the Elasticsearch side with the 8:35–8:38 outage.
 
-We have established that Elasticsearch search thread-pool saturation caused the user-visible failure around 08:35-08:38 EDT.
+The main issue was search thread-pool saturation on the ProSearch data nodes. Around 8:33, several searches became much slower than normal. Traffic only increased slightly, but latency jumped enough for the search queues to grow to their limit of 1000. Once that happened, requests started timing out/rejecting, which lines up with the ProSite `curl_exec failed` errors. The cluster recovered once the backlog drained.
 
-Now investigate WHY this happened specifically today around 08:33 EDT.
+The key capacity issue is that each data pod has 2.5 CPUs available, but Elasticsearch is configured with `allocated_processors=1`, so each data node only gets a very small search thread pool. Elasticsearch uses this processor value to size its thread pools.
 
-Important:
-- Do not spend time re-proving that the search queue saturated.
-- Treat allocated_processors=1 / search pool size=2 as an underlying capacity weakness.
-- The goal now is to identify the workload/query/application trigger that caused the queue to begin growing around 08:33.
-- Do not assume a traffic spike, because observed search request rate only increased modestly.
+Historical metrics also show similar weekday queue activity around this same time, but normally it clears before reaching the limit. Today the searches were slower and pushed it over the threshold.
 
-Correlate the window 08:25-08:40 EDT (12:25-12:40 UTC).
+I don’t see evidence that the 2 `es-prosearch-client` pods were the primary bottleneck. We also saw no pod restarts, OOMs, GC issues, shard imbalance, DNS, or service failures.
 
-Investigate read-only:
-
-1. Search ProSite/provider application logs for activity beginning around 08:32-08:34.
-   Look for:
-   - bill searches
-   - reports
-   - batch operations
-   - scheduled jobs
-   - retries
-   - repeated correlation IDs
-   - repeated Elasticsearch query endpoints
-   - unusually high request counts from one route/user/service
-
-2. Analyze es-prosearch-client nginx access logs for 08:25-08:40.
-   Group requests by:
-   - Elasticsearch URI/index
-   - request path
-   - source IP if available
-   - HTTP method
-   - response/request duration
-   - status
-   - client pod
-
-   Identify which request types increased in count or latency starting around 08:33.
-
-3. Compare two windows:
-   BASELINE: 08:25-08:32
-   INCIDENT BUILDUP: 08:33-08:38
-
-   Show:
-   - total search requests
-   - requests/sec
-   - average latency
-   - p95/max latency if derivable
-   - most frequent endpoint/query type
-   - biggest change between windows
-
-4. Look for individual requests taking seconds instead of the normal baseline.
-   Determine whether queue growth was driven primarily by:
-   A. more queries,
-   B. slower queries,
-   C. both.
-
-5. Check Kubernetes CronJobs/jobs and application schedules that ran around 08:30-08:35.
-   Include any report-generation, indexing, synchronization, billing, or batch jobs.
-
-6. Check prosearch-indexer activity around the same time and determine whether indexing/write workload increased concurrently.
-
-7. Search historical logs from previous days around the same clock time (08:25-08:40) if available.
-   Determine whether this workload regularly runs at approximately 08:30 and whether queue/rejection patterns occurred previously without user-visible impact.
-
-8. Look for retry amplification:
-   determine whether initial slow Elasticsearch requests caused the application to retry, thereby increasing Elasticsearch demand.
-
-9. If query bodies are logged safely, identify the expensive query/query pattern. Do not expose credentials, PHI, or sensitive payload data in the report.
-
-At the end provide:
-
-A. What changed beginning around 08:33
-B. Best-supported incident trigger
-C. Whether demand increased, query duration increased, or both
-D. Which application/job/query generated the additional search work
-E. Why the same configuration may have operated normally before today
-F. Evidence supporting the trigger
-G. Missing evidence if the trigger cannot be definitively identified
-
-Do not make any changes.
+Recommendation: correct the processor configuration on the data nodes to match their actual CPU allocation, add alerting for search queue/rejections/latency, enable better slow-query visibility, and plan an upgrade from ES 6.2.3. We should validate/load-test the processor change before applying it in prod.
