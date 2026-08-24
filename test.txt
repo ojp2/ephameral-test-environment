@@ -1,11 +1,7 @@
-I finished correlating the Elasticsearch side with the 8:35–8:38 outage.
+Good question. I dug into that part specifically.
 
-The main issue was search thread-pool saturation on the ProSearch data nodes. Around 8:33, several searches became much slower than normal. Traffic only increased slightly, but latency jumped enough for the search queues to grow to their limit of 1000. Once that happened, requests started timing out/rejecting, which lines up with the ProSite `curl_exec failed` errors. The cluster recovered once the backlog drained.
+It looks like most of the requests weren't getting an ES error back because they were sitting queued waiting on the saturated data nodes. The PHP cURL timeout is around 30s, while nginx would wait longer for the upstream response. So PHP gave up first and closed the connection, which is why nginx recorded 499s and the app surfaced it as `curl_exec failed` instead of getting a clean 429/5xx back from Elasticsearch.
 
-The key capacity issue is that each data pod has 2.5 CPUs available, but Elasticsearch is configured with `allocated_processors=1`, so each data node only gets a very small search thread pool. Elasticsearch uses this processor value to size its thread pools.
+I checked the client logs as well and during this window we had 499s, but no corresponding 429/503/504 responses. That lines up with the requests timing out while queued rather than Elasticsearch returning an HTTP error first.
 
-Historical metrics also show similar weekday queue activity around this same time, but normally it clears before reaching the limit. Today the searches were slower and pushed it over the threshold.
-
-I don’t see evidence that the 2 `es-prosearch-client` pods were the primary bottleneck. We also saw no pod restarts, OOMs, GC issues, shard imbalance, DNS, or service failures.
-
-Recommendation: correct the processor configuration on the data nodes to match their actual CPU allocation, add alerting for search queue/rejections/latency, enable better slow-query visibility, and plan an upgrade from ES 6.2.3. We should validate/load-test the processor change before applying it in prod.
+So the client pods were still functioning as coordinators; they were waiting on the backed-up search work downstream and the application timeout fired before a response made it back.
