@@ -1,0 +1,123 @@
+Act as an SRE investigating the Elasticsearch/ProSearch production incident from August 24, 2026 around 08:37 AM local time.
+
+IMPORTANT:
+- READ-ONLY investigation only.
+- Do NOT apply, patch, scale, restart, delete, rollout, edit, cordon, drain, or modify anything in Kubernetes or Elasticsearch.
+- Do NOT change Elasticsearch settings.
+- Do NOT assume the 2 es-prosearch-client pods are the root cause.
+- Do NOT assume the cumulative search thread-pool rejection counters happened during this incident.
+- Before every command, briefly state what evidence you are trying to obtain.
+
+Known facts:
+- ProSite produced multiple failures around 08:37:28–08:37:29.
+- Application stack trace shows:
+  ElasticsearchClient->query()
+  Patientco\Curl->post()
+  curl_exec failed
+- Application logs do not expose curl_errno, curl_error, destination HTTP status, or actual Elasticsearch response.
+- Live Elasticsearch workloads are es-prosearch-client, es-prosearch-master, and es-prosearch-data in the default namespace.
+- There are 2 es-prosearch-client coordinating pods.
+- There are 3 Elasticsearch data nodes.
+- Cluster is currently GREEN.
+- No known pod crashes/OOMs/restarts occurred.
+- We previously observed cumulative search thread-pool rejected counts, including 1238 and 245 on data nodes, but those counters may predate the incident.
+- prosearch service has 2 client endpoints.
+- Some search request latency has been observed in the 0.2s–4.2s range.
+
+Goal:
+Determine the most evidence-supported root cause of the 08:37 incident and distinguish among:
+1. es-prosearch-client/coordinating-node saturation
+2. data-node search thread-pool saturation
+3. JVM/GC or memory pressure
+4. CPU saturation
+5. hot shard / uneven shard distribution
+6. slow or expensive Elasticsearch queries
+7. sudden traffic/request burst
+8. connection/socket exhaustion
+9. Kubernetes service/network/DNS issue
+10. Elasticsearch node instability
+11. another cause supported by evidence
+
+Investigation steps:
+
+1. Inventory all prosearch Elasticsearch pods, services, endpoints, deployments/statefulsets and show age, node placement, readiness, restarts and resource requests/limits.
+
+2. Determine the exact Elasticsearch version before using version-dependent APIs.
+
+3. Inspect es-prosearch-client and data-node logs around 08:30–08:45. Search for:
+   rejected
+   EsRejectedExecutionException
+   timeout
+   circuit_breaking_exception
+   429
+   connection reset/refused
+   GC overhead
+   master/node disconnects
+   transport errors
+   OutOfMemory
+   long GC pauses
+
+4. Inspect nginx/prosearch client access/error logs specifically between 08:30 and 08:45.
+   Determine:
+   - requests per second
+   - response latency
+   - HTTP status codes
+   - upstream response times
+   - timeout/reset errors
+   - whether both client pods were affected
+   - whether traffic was balanced between the two client pods
+
+5. Query Elasticsearch READ-ONLY APIs for:
+   - _cluster/health
+   - _cat/nodes
+   - _cat/thread_pool/search
+   - _nodes/stats/thread_pool
+   - _nodes/stats/jvm,process,os,fs,indices
+   - _cat/shards
+   - _cat/allocation
+   - _nodes/hot_threads if safe/read-only
+   - pending tasks
+   - current tasks/search activity
+
+6. For thread-pool rejection counters, clearly distinguish CURRENT state from CUMULATIVE counters.
+   Do not attribute cumulative rejected counts to 08:37 unless logs or historical metrics establish that timing.
+
+7. Check for hot spotting:
+   - shard distribution across data nodes
+   - one node receiving much more search work
+   - uneven index/shard sizes
+   - concentrated rejected requests
+   - CPU/JVM differences between nodes
+
+8. Check Kubernetes resource behavior:
+   - CPU/memory for client and data nodes
+   - throttling if available
+   - pod restarts
+   - node pressure
+   - pod events
+   - endpoint changes around the incident if logs/events retain enough history
+
+9. Look for historical metrics already available through Prometheus/Grafana/exporter if accessible from the environment.
+   Specifically correlate 08:30–08:45 for:
+   - search rate
+   - search latency
+   - thread pool active/queue/rejected
+   - JVM heap
+   - GC
+   - CPU
+   - disk latency/I/O
+   - HTTP connections
+   - Elasticsearch node availability
+
+10. Correlate all evidence against the exact ProSite failure timestamp around 08:37:28.
+
+At the end, provide:
+A. Timeline
+B. Confirmed facts
+C. Evidence for and against each likely cause
+D. Most likely root cause, with confidence level: High / Medium / Low
+E. Contributing factors
+F. What evidence is still missing
+G. Preventative recommendations, but DO NOT execute any changes
+
+Do not call something the root cause merely because it looks suspicious. If evidence only supports a hypothesis, label it as a hypothesis.
