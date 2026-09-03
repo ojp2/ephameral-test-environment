@@ -1,7 +1,42 @@
-Good question. I dug into that part specifically.
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cmk-test
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ebs-gp3
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cmk-test
+spec:
+  containers:
+    - name: app
+      image: public.ecr.aws/docker/library/busybox:latest
+      command: ["sh", "-c", "echo hello > /data/test && sleep 3600"]
+      volumeMounts:
+        - name: vol
+          mountPath: /data
+  volumes:
+    - name: vol
+      persistentVolumeClaim:
+        claimName: cmk-test
+EOF
 
-It looks like most of the requests weren't getting an ES error back because they were sitting queued waiting on the saturated data nodes. The PHP cURL timeout is around 30s, while nginx would wait longer for the upstream response. So PHP gave up first and closed the connection, which is why nginx recorded 499s and the app surfaced it as `curl_exec failed` instead of getting a clean 429/5xx back from Elasticsearch.
+# watch it bind + the pod come up
+kubectl get pvc cmk-test -w        # STATUS should go Pending -> Bound
+kubectl get pod cmk-test           # should reach Running
 
-I checked the client logs as well and during this window we had 499s, but no corresponding 429/503/504 responses. That lines up with the requests timing out while queued rather than Elasticsearch returning an HTTP error first.
 
-So the client pods were still functioning as coordinators; they were waiting on the backed-up search work downstream and the application timeout fired before a response made it back.
+VOL=$(kubectl get pvc cmk-test -o jsonpath='{.spec.volumeName}')
+aws ec2 describe-volumes \
+  --filters "Name=tag:kubernetes.io/created-for/pv/name,Values=$VOL" \
+  --query 'Volumes[].{Encrypted:Encrypted,KmsKeyId:KmsKeyId}' --output table
+
+kubectl delete pod cmk-test
+kubectl delete pvc cmk-test   # reclaimPolicy: Delete means the EBS volume is removed too
