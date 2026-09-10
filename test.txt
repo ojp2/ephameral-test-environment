@@ -1,3 +1,21 @@
+
+gcloud asset search-all-iam-policies \
+  --scope=projects/PROJECT_ID \
+  --format=json > iam_policies.json
+
+# Flatten to CSV
+jq -r '
+  ["member","role","resource"],
+  (.[] | .policy.bindings[] as $b | $b.members[] as $m | [$m, $b.role, .resource])
+  | @csv
+' iam_policies.json > gcp_iam_listing.csv
+
+gcloud iam service-accounts list --format="csv(email,disabled,displayName)" > service_accounts.csv
+
+# Key age/last-used per SA (proxy for last login on SAs)
+gcloud iam service-accounts keys list --iam-account=SA_EMAIL \
+  --format="csv(name,validAfterTime,validBeforeTime)"
+
 kubectl auth can-i create persistentvolumeclaims \
   --as=system:serviceaccount:harness-delegate-ng:pfc-delegate \
   -n harness-delegate-ng
